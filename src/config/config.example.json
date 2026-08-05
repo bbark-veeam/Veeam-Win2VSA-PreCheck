@@ -1,0 +1,12 @@
+{
+  "//": "Copy to config.json (git-ignored) and edit. All fields optional; CLI parameters override these.",
+  "Server": "localhost",
+  "//Server": "The WINDOWS VBR v13.0.x server being evaluated. Run this ON that server when possible. Do NOT point at a v13 VSA appliance.",
+
+  "UpgradeDate": null,
+  "//UpgradeDate": "yyyy-MM-dd upgrade cutoff for DB-001. Sessions from BEFORE this date are flagged. KB4800's strict boundary is the v12 upgrade date (sessions predating the move to v12 cause failure); the v13 upgrade date works as a broader/conservative cutoff. The remedy is the same either way: reduce session-history retention so old sessions age out.",
+
+  "OutputPath": "./output",
+  "ReportFormat": "All",
+  "//ReportFormat": "None | Json | Html | All"
+}

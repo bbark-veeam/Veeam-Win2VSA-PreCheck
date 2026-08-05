@@ -1,0 +1,277 @@
+# Checks Reference — KB4800 coverage map
+
+> **KB4800 as captured 2026-07-24.** It is a living document, so its guidance can
+> change with a new release. Every report states this date, from the
+> `$script:PrecheckKbCaptured` constant in `VbrMigrationPrecheck/Private/New-PrecheckResult.ps1`
+> — update it there whenever the KB is re-read and these checks are reconciled
+> against it.
+
+Each row maps a check to the [KB4800](https://www.veeam.com/kb4800) limitation it
+evaluates, the primary cmdlet(s) it uses, the status it can emit, and a
+**field-confidence** rating for how reliably the automated detection works
+against a real environment (see the caveat at the bottom).
+
+| ID | Category | Limitation (KB4800) | Primary cmdlet(s) | Possible status | Confidence |
+|----|----------|--------------------|-------------------|-----------------|------------|
+| ENV-001 | Environment | Source must be on the **13.0.x** train; **13.1 cannot migrate**. Builds newer than 13.1 return `Manual` — the check makes no claim about releases that have not shipped | `Get-VBRBackupServerInfo` / registry / core DLL | Pass / Action / Blocker / Manual / Info | High |
+| ENV-002 | Environment | VSA supports only instance-based VUL; socket must convert | `Get-VBRInstalledLicense` | Pass / Action / Info | Medium |
+| DEP-001 | Deployment | Cloud Connect deployments cannot migrate. Read from the licence itself (`.CloudConnect` = Enabled/Disabled/Enterprise/Invalid); tenants and gateways enrich the evidence | `Get-VBRInstalledLicense`, `Get-VBRCloudTenant`, `Get-VBRCloudGateway` | Pass / Blocker / Info | High |
+| DEP-002 | Deployment | Google Cloud plug-in config will not migrate (Windows-only). Detected from CONFIGURATION (`Get-VBRGoogleCloudAccount`, `Get-VBRGoogleCloudComputeAccount`) plus a job-name signal. The plug-in ships with VBR so installation proves nothing; external repositories are not examined | `Get-VBRGoogleCloud*Account`, `Get-VBRJob` | Pass / Warning / Manual | Medium |
+| DEP-003 | Deployment | Entra ID tenant backup **data** not migrated | `Get-VBREntraIDTenant` | Pass / Manual / Info | High |
+| AGT-001 | Agents | All agents must be v13+ to connect | `Get-VBRDiscoveredComputer` | Pass / Action / Manual | High — validated |
+| AGT-002 | Agents | Disabled agent policies must be applied/synced first. Keyed on `JobEnabled` (NOT `IsEnabled`, which does not exist; NOT `ScheduleEnabled`, which is a different thing). Whether config was applied is not exposed at all — see note | `Get-VBRComputerBackupJob` | Pass / Action / Info | High — validated |
+| AGT-003 | Agents | Mac agent domain accounts must become local (no Kerberos/NTLM) | `Get-VBRComputerBackupJob` | Pass / Manual | Low |
+| AGT-004 | Agents | Post-migration: rescan all PGs; pre-installed-agent PGs need new config file. Keyed on `Container.Type -eq ManuallyDeployed` — see note | `Get-VBRProtectionGroup` | Pass / Manual | High — validated |
+| STG-001 | Storage | NetApp ONTAP: only NAS filer role migrates | `Get-NetAppHost` (no VBR prefix) | Pass / Warning / Info | High |
+| STG-002 | Storage | IBM/Hitachi/HPE XP plug-in minimum versions post-migration | `Get-StoragePluginHost` (no VBR prefix) | Pass / Manual / Info | Medium |
+| STG-003 | Storage | HPE Nimble/Alletra FIPS-mode OS support | `Get-NimbleHost` (no VBR prefix) | Pass / Warning / Info | High |
+| JOB-001 | Jobs | CDP job config not migrated (manual re-create) | `Get-VBRCDPPolicy` | Pass / Warning / Info | High |
+| JOB-002 | Jobs | SureBackup SQL Server Checker Script fails on VSA | `Get-VBRApplicationGroup` | Pass / Blocker / Manual | High — both paths validated |
+| JOB-003 | Jobs | Pre/post-job + pre-freeze/post-thaw scripts & CSVs copied manually. Reads all three surfaces — see note below. CSV files remain undetectable and are named as such | `Get-VBRJob`, `Get-VBRJobObject` | Pass / Manual | High — validated |
+| SEC-001 | Security | Four-eyes authorization disabled during migration | none exists → manual | Manual | n/a |
+| SEC-002 | Security | Non-UPN **Standard** credentials to review for Kerberos-authenticated connections | `Get-VBRCredentials` | Pass / Manual | Medium — see note |
+| SEC-003 | Security | Trusted-domain authentication unsupported | (manual) | Manual | n/a |
+| SEC-004 | Security | Local (non-domain) repo access accounts → "SID not found" | `Get-VBREPPermission` -Repository → `.Users` | Pass / Action / Manual / Info | Medium — see note |
+| SEC-005 | Security | Console role assignments must be UPN (appliance console login) — see note; the down-level question is OPEN (LAB-PLAN D3) | `Get-VBRUserRoleAssignment` | Pass / Action / Manual | Medium — premise partly unresolved |
+| DB-001 | Job history | Job-history sessions predating the upgrade cutoff fail migration | `Get-VBRBackupSession` | Pass / Action / Manual / Info | Medium |
+
+### Pre-Migration Considerations (KB4800) → `NextStep`
+
+These are preparation *actions* to take before starting the migration, not
+pass/fail limitations. They emit the advisory `NextStep` status in category **Preparation**, and appear in the
+report's dedicated **Pre-Migration Next Steps** section. A conditional one stays
+silent (`Skipped`) when its feature is absent — so a next step only appears when
+it actually applies. (Considerations #4 CDP, #5 disabled agent policies, #6 agent
+v13, #7 local repo accounts are already enforced as limitation checks above.)
+
+| ID | Consideration (KB4800) | Cmdlet(s) | Emits |
+|----|------------------------|-----------|-------|
+| PRE-001 | Configure a secondary target for Entra ID tenant backups first | `Get-VBREntraIDTenant` (→ `New-/Set-VBREntraIDBackupSecondaryTarget`) | NextStep / Skipped |
+| PRE-002 | Verify all managed machines are reachable from the VSA (net/FW/DNS) | `Get-VBRServer` | NextStep (always) |
+| PRE-003 | File-to-tape: use the source server **short** hostname, resolvable | `Get-VBRTapeJob` | NextStep / Skipped |
+| PRE-004 | Match VSA timezone to this Windows machine (Hitachi / HPE XP) | `Get-StoragePluginHost` + `Get-TimeZone` | NextStep / Skipped |
+
+> **On DB-001's date (`-UpgradeDate`):** the check simply flags sessions created
+> *before* the supplied cutoff. KB4800's strict boundary is the **v12** upgrade
+> date (sessions predating the move to v12 cause failure). The **v13** upgrade
+> date works as a broader/conservative cutoff — it also catches legitimate v12-era
+> sessions, but the remedy (reduce history retention) is identical, so it errs
+> safe. With no date, DB-001 reports the oldest session date to compare by hand.
+
+> **Cmdlet names verified** against the official A-Z reference
+> (`docs/reference/vbr-v13-cmdlets.md`, 1481 cmdlets). Every cmdlet named above
+> exists in v13. What remains unvalidated for Low/Medium rows is the exact
+> *property* each check reads off the returned object (e.g. the agent-version
+> property on `Get-VBRDiscoveredComputer`), not the cmdlet name itself.
+
+## Status meanings
+
+- **Blocker** — migration is not supported / will fail; hard stop until resolved.
+- **Action** — must be remediated before migration or it will fail.
+- **Warning** — migration proceeds, but configuration is lost/changed/disabled.
+- **Manual** — a manual pre/post step is required that can't be automated; confirm it.
+- **NextStep** — advisory pre-migration preparation action (KB4800 considerations); never a blocker; shown in the Pre-Migration Next Steps section.
+- **Info** — could not be auto-evaluated (cmdlet/property absent); verify by hand.
+- **Pass** — no issue found. **Skipped** — not applicable.
+
+## Overall verdict → exit code
+
+| Verdict | Condition | Exit code |
+|---------|-----------|-----------|
+| MIGRATION BLOCKED | any Blocker | 2 |
+| ACTION REQUIRED | any Action, no Blocker | 1 |
+| REVIEW WARNINGS | only Warning/Manual/Info | 0 |
+| READY | all Pass/Skipped | 0 |
+
+## Note on SEC-005 — the required form differs for a user and a group
+
+The appliance wants an `@` form for both, but **not the same `@` form**, and handing an
+operator the wrong one sends them to do something that fails:
+
+| Principal | Appliance form | Example |
+|---|---|---|
+| Domain user | `user@fqdn` | `bbarker@corp.local` |
+| Default domain security group | **`group@domain`** | `Administrators@tech.local` |
+| Local / builtin (`BUILTIN\…`, `MACHINE\…`) | no counterpart exists — assign a domain principal instead | — |
+
+Source: Veeam User Guide, *Configuring Users and Roles* — "To add a default domain
+security group, use the group@domain format, for example, Administrators@tech.local."
+
+`group@domain` is Veeam's **input syntax for naming a group, not a UPN.**
+`userPrincipalName` is an attribute of the AD *user* class; groups do not have one. That
+distinction matters when a lookup fails: the text before `@` must be the group's actual
+name, so `Administrators@corp.local` and `Domain Admins@corp.local` are different groups
+and not interchangeable.
+
+Detection is the same for both — anything without `@` is flagged — so only the
+remediation wording is type-dependent. Until 0.3.7 every finding named `user@fqdn`,
+which is unachievable for a group.
+
+## Note on AGT-002 — three "enabled" notions, and one thing that cannot be read
+
+`VBRComputerBackupJob` carries more than one enabled-ish property, and picking the
+wrong one is silent either way:
+
+| Property | Meaning | Used? |
+|---|---|---|
+| **`JobEnabled`** | the policy itself is enabled/disabled | **yes — this is the KB4800 item** |
+| `ScheduleEnabled` | the policy has a schedule | no. A policy can be `JobEnabled = True` with `ScheduleEnabled = False` — enabled, just unscheduled. Matching it flags working policies |
+| `IsEnabled` | **does not exist** | no. Until 0.3.5 the check filtered on this name, matched nothing, and returned Pass on every server |
+
+**What the object does not expose at all: whether a disabled policy's configuration was
+ever applied.** A full property dump of a real 13.x policy shows no apply, sync, state
+or deployment member of any kind. KB4800's concern is specifically a disabled policy
+whose configuration was never applied successfully, so the check cannot narrow to just
+the failing ones — it reports every disabled policy and says plainly that the applied
+state is not something it can read, rather than leaving the reader to assume it was
+verified.
+
+`Mode` (`ManagedByAgent` / `ManagedByBackupServer`) and the target protection group are
+carried in the evidence as context for triage.
+
+## Note on AGT-004 — the API does not use the word "pre-installed"
+
+The console offers *Computers with pre-installed Veeam backup agents*. Nothing in the
+object model is called that, and until 0.3.4 the check looked for it on the wrong
+property — `VBRProtectionGroup.Type`, which holds only `Custom` and `ManuallyAdded`,
+making the finding unreachable on every server.
+
+The kind of a protection group is on its **container**:
+
+| `Container.Type` (`VBRProtectionGroupContainerType`) | Console equivalent |
+|---|---|
+| `IndividualComputers` | Individual computers |
+| `ActiveDirectory` | Microsoft Active Directory objects |
+| `CSV` | Computers from a CSV file |
+| **`ManuallyDeployed`** | **Computers with pre-installed Veeam backup agents** ← the one KB4800 calls out |
+| `CloudMachines` | Cloud machines |
+| `MongoDBComputers` | MongoDB computers |
+
+Two consequences worth keeping:
+
+- **Compare the enum exactly; never substring-match.** `ManuallyDeployed` (container)
+  and `ManuallyAdded` (group type) both contain "Manual", and a loose match reproduces
+  the original defect — the built-in "Manually Added" group flagged on every server.
+- **Container type cannot be filtered server-side.** `Get-VBRProtectionGroup -Type`
+  accepts only `Custom` / `ManuallyAdded`, so the kind has to be read per group after
+  retrieval.
+
+Evidence states each group's kind, so the classification can be checked from the report
+rather than trusted. A group whose container cannot be read says so.
+
+## Note on SEC-004 — local vs domain cannot be read off the name
+
+Until 0.3.2 this check read `$perm.Accounts`. `VBREPPermission` has no such property,
+so the account list was always `$null` and the check returned **Pass on every server,
+unconditionally** — it could not fire even in principle. The property is `Users`.
+
+The harder half is that the two forms that matter look identical:
+
+| Account | Prefix | Survives migration? |
+|---|---|---|
+| `BACKUP01\Administrator` | machine name | **No** — SID does not exist on the appliance |
+| `CORP\Administrator` | NetBIOS domain | Yes |
+
+Both are a dotless label plus a backslash, so the shape alone decides nothing. The
+check resolves the server's own identity — `Win32_ComputerSystem.Domain`, falling back
+to `USERDOMAIN`/`USERDNSDOMAIN` — and treats a prefix as **local** when it matches the
+machine name, the repository host's short name, `.`, `BUILTIN` or `NT AUTHORITY`; as
+**domain** when it contains a dot, matches the server's own domain label, or the name
+is a UPN.
+
+Anything left over (an unrecognised NetBIOS prefix, or a bare user name) returns
+`Manual` naming it for review. Both possible guesses are harmful at fleet scale:
+guessing *local* tells the operator to strip valid domain accounts from 200 servers,
+and guessing *domain* restores the false Pass.
+
+## Note on JOB-003 — three surfaces, one of which was invisible
+
+Job scripts are not stored in one place. Until 0.3.0 this check read only the first
+of three, and returned a clean result on a lab job that had **all four script slots
+populated** — the kind of false negative that reads as correct code:
+
+| Where the operator sets it | Where it is stored | Read since |
+|---|---|---|
+| Job → *Storage* → **Advanced** → *Scripts* (pre-job / post-job) | `$job.GetOptions().JobScriptCommand` | 0.3.0 |
+| Job → *Guest Processing* → application handling **for individual servers** → *Scripts* | the job **object**: `$obj.VssOptions.GuestScriptsOptions` | 0.3.0 |
+| Job-level guest processing default | `$job.Info.VssOptions.GuestScriptsOptions` | always |
+
+The per-machine override was the one that mattered: `IsAtLeastOneScriptSet` is
+accurate *at each level independently*, so the job default correctly reported
+`False` while the override on the same job reported `True`. Reading the job level
+alone therefore gave a confident, wrong answer.
+
+Per-object options are read from the object's own `.VssOptions` property, not
+`Get-VBRJobObjectVssOptions` — the cmdlet is a round-trip per object (measured 4 ms
+vs 56 ms for two objects, identical data), and this tool is run across a large fleet.
+
+**Pre/post-job entries are command lines, not paths**, so they can carry arguments
+including a password. The check reports the executable only, and reports "enabled,
+command line not shown" when the two cannot be separated confidently — an unquoted
+path containing spaces, or an interpreter such as `powershell.exe` where the script
+is itself an argument.
+
+## Note on SEC-002 — why it reports rather than prescribes
+
+Credential format cannot be judged from the credential string alone, because
+**Datacenter Credentials is a single flat store shared by surfaces with conflicting
+documented requirements**:
+
+- Veeam's permissions documentation gives down-level format for a *Source/Target
+  VMware vSphere Host* and for a *Windows Server added to the backup
+  infrastructure*: "use the MACHINE\USER format for local accounts or DOMAIN\USER
+  format for domain accounts".
+- **But for Windows servers the console is more specific, and testing confirms it.**
+  The *New Windows Server* wizard states: "Select a **Kerberos domain account** with
+  administrator privileges. Use **USER@FQDN or FQDN\USER** format for the account
+  name." Adding a Windows server to a v13 appliance was then tested with all three
+  forms:
+
+  | Credential form | Result |
+  |---|---|
+  | `corp\administrator` (NetBIOS prefix) | **failed** |
+  | `corp.local\administrator` (FQDN prefix) | worked |
+  | `administrator@corp.local` (UPN) | worked |
+
+  So the permissions table's "DOMAIN\USER" wording is misleading for this surface: a
+  **NetBIOS** prefix is rejected, an **FQDN** prefix is accepted. SEC-002 therefore
+  treats a prefix containing a dot as already Kerberos-compatible and does not flag
+  it.
+
+- **SEC-005 is deliberately stricter.** Console *login* on the appliance takes UPN
+  only — the sign-in form rejects any prefixed form, including `fqdn\user`. The two
+  checks differ on purpose and should not be harmonised.
+- The Kerberos requirement for **guest OS processing** is the opposite direction:
+  "Local accounts do not support Kerberos authentication. To authenticate with
+  Microsoft Windows guest OS using Kerberos, specify an Active Directory account."
+
+So the same credential string is correct in one usage and wrong in another. An
+earlier version of this check flagged every credential containing a backslash and
+recommended re-entering it in UPN format — which, applied to a vSphere host or
+Windows infrastructure-server credential, would have instructed the operator to
+break a correctly-configured connection.
+
+SEC-002 therefore lists **candidates for human review** and prescribes nothing. It
+reports Standard-type credentials in `DOMAIN\user` or bare-user form, excluding:
+
+| Excluded | Reason |
+|---|---|
+| SSH credentials, SSH private key, Kasten authentication token, Managed service account | Not Standard type; cannot sit on a Windows Kerberos path |
+| `root` | Linux / ESXi / appliance accounts — also removes the credential records VBR auto-creates on every server, which would be per-server noise at fleet scale |
+| Anything containing `@` | Already UPN-shaped. Note `administrator@vsphere.local` (vCenter SSO local) and `@system` (Cloud Director) are *not* UPNs, but neither is on a Kerberos path |
+
+A future revision can narrow this to an actionable finding once credential **usage**
+is resolved (which credential each job's guest processing and each component
+connection actually references).
+
+## Confidence caveat (read before trusting Low/Medium rows)
+
+The checks were authored against KB4800 and the documented Veeam v13 cmdlet
+surface, but **the exact cmdlet names and object properties for several features
+have not yet been validated against a live v13 environment.** Low/Medium-confidence
+checks are deliberately conservative: when a cmdlet or property is missing they
+degrade to **Manual/Info** with the correct guidance rather than a false Pass, so
+the tool never silently tells you a real blocker is clear.
+
+Checks marked **validated** have been exercised against a live Windows VBR 13.0.x
+server, in both the finding and the no-finding direction where that was possible.

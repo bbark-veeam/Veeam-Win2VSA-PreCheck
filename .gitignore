@@ -1,0 +1,11 @@
+# Precheck run artefacts are environment-specific and must never be committed.
+output/
+precheck-*.json
+precheck-*.html
+precheck-*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
