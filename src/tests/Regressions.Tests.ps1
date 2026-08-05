@@ -34,6 +34,7 @@ BeforeAll {
     $global:MockCreds       = @()
     $global:MockLicense     = $null
     $global:MockHistory     = $null
+    $global:MockSecurityOptions = $null
     $global:MockCloudTenants  = @()
     $global:MockCloudGateways = @()
 
@@ -60,6 +61,7 @@ BeforeAll {
     function global:Get-VBRCredentials             { param($ErrorAction) Assert-MockOk 'Get-VBRCredentials'; $global:MockCreds }
     function global:Get-VBRInstalledLicense       { param($ErrorAction) Assert-MockOk 'Get-VBRInstalledLicense'; $global:MockLicense }
     function global:Get-VBRHistoryOptions        { param($ErrorAction) Assert-MockOk 'Get-VBRHistoryOptions'; $global:MockHistory }
+    function global:Get-VBRSecurityOptions       { param($ErrorAction) Assert-MockOk 'Get-VBRSecurityOptions'; $global:MockSecurityOptions }
     # DB-001 reads the retention SETTING, never the sessions. This stub fails loudly if
     # anything reaches for the sessions again: the cmdlet has no date filter and no
     # ordering, so touching it materialises every session on the server - the original
@@ -106,7 +108,7 @@ BeforeAll {
         $global:MockCdp = @(); $global:MockTenants = @(); $global:MockNetApp = @()
         $global:MockPluginHosts = @(); $global:MockNimble = @(); $global:MockCreds = @()
         $global:MockThrow = @()
-        $global:MockLicense = $null; $global:MockHistory = $null
+        $global:MockLicense = $null; $global:MockHistory = $null; $global:MockSecurityOptions = $null
         $global:MockCloudTenants = @(); $global:MockCloudGateways = @()
     }
 
@@ -532,8 +534,11 @@ Describe 'STG-002 Universal Storage Plugin' {
 Describe 'STG-003 HPE Nimble / Alletra' {
     BeforeEach { Reset-MockState }
 
+    # The FIPS state has to be stated: the finding is now conditional on it, and leaving
+    # it unset is the "could not be read" case, which defers rather than warning.
     It 'flags an integrated Nimble system' {
         $global:MockNimble = @([pscustomobject]@{ Name = 'nimble-01' })
+        $global:MockSecurityOptions = [pscustomobject]@{ FipsCompliantModeEnabled = $false }
         $r = Invoke-Check 'Test-NimbleFips'
         $r.Status | Should -Be 'Warning'
         ($r.Evidence -join ';') | Should -Match 'nimble-01'
@@ -959,5 +964,71 @@ Describe 'SEC-005 console role assignment format' {
         $r.Status | Should -Be 'Manual'
         $r.Status | Should -Not -Be 'Pass'
         $r.Detail | Should -Match 'always has at least one assignment'
+    }
+}
+
+Describe 'STG-003 Nimble under FIPS-compliant mode' {
+    BeforeEach {
+        Reset-MockState
+        $global:MockNimble = @([pscustomobject]@{ Name = 'nimble-01' })
+    }
+
+    # The restriction only bites when FIPS-compliant mode is in use, and that state is
+    # readable (Get-VBRSecurityOptions -> FipsCompliantModeEnabled), so the check should
+    # say whether THIS server is affected rather than warning identically everywhere.
+    It 'asks for a decision when FIPS-compliant mode is enabled' {
+        $global:MockSecurityOptions = [pscustomobject]@{ FipsCompliantModeEnabled = $true }
+        $r = Invoke-Check 'Test-NimbleFips'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'FIPS-compliant mode is enabled'
+        # The restriction is VERSION-dependent per the UG, and both options must be
+        # offered, since dropping FIPS is often not possible in a secure environment.
+        $r.Detail | Should -Match 'may not be supported'
+        $r.Recommendation | Should -Match 'Nimble OS version'
+        $r.Recommendation | Should -Match 'FIPS-compliant mode'
+        # It is NOT scoped to Backup from Storage Snapshots - that is a separate
+        # consideration on the same UG page and out of KB4800 scope.
+        $r.Detail | Should -Not -Match 'Backup from Storage Snapshots'
+        ($r.Evidence -join ';') | Should -Match 'FIPS-compliant mode on this server: True'
+    }
+
+    It 'only warns when FIPS-compliant mode is off, and says why it could still matter' {
+        $global:MockSecurityOptions = [pscustomobject]@{ FipsCompliantModeEnabled = $false }
+        $r = Invoke-Check 'Test-NimbleFips'
+        $r.Status | Should -Be 'Warning'
+        $r.Detail | Should -Match 'not enabled on this server'
+        $r.Detail | Should -Match 'enabling it on the appliance later'
+    }
+
+    It 'defers when the FIPS state cannot be read rather than assuming it is off' {
+        $global:MockThrow = @('Get-VBRSecurityOptions')
+        $r = Invoke-Check 'Test-NimbleFips'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be read'
+    }
+
+    It 'defers when the FIPS property is absent from the options object' {
+        $global:MockSecurityOptions = [pscustomobject]@{ AuditLogsPath = 'C:\Logs' }
+        (Invoke-Check 'Test-NimbleFips').Status | Should -Be 'Manual'
+    }
+
+    # No arrays means no restriction to consider, whatever FIPS is set to.
+    It 'passes with no Nimble arrays even when FIPS is enabled' {
+        $global:MockNimble = @()
+        $global:MockSecurityOptions = [pscustomobject]@{ FipsCompliantModeEnabled = $true }
+        $r = Invoke-Check 'Test-NimbleFips'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'read successfully'
+    }
+
+    It 'names every array it found' {
+        $global:MockNimble = @(
+            [pscustomobject]@{ Name = 'nimble-01' }
+            [pscustomobject]@{ Name = 'alletra-6000-a' }
+        )
+        $global:MockSecurityOptions = [pscustomobject]@{ FipsCompliantModeEnabled = $true }
+        $r = Invoke-Check 'Test-NimbleFips'
+        $r.Detail | Should -Match '2 HPE Nimble/Alletra system'
+        ($r.Evidence -join ';') | Should -Match 'alletra-6000-a'
     }
 }

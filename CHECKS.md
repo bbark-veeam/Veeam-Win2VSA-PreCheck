@@ -24,7 +24,7 @@ against a real environment (see the caveat at the bottom).
 | AGT-004 | Agents | Post-migration: rescan all PGs; pre-installed-agent PGs need new config file. Keyed on `Container.Type -eq ManuallyDeployed` — see note | `Get-VBRProtectionGroup` | Pass / Manual | High — validated |
 | STG-001 | Storage | NetApp ONTAP: only NAS filer role migrates | `Get-NetAppHost` (no VBR prefix) | Pass / Warning / Info | Medium - mock-tested |
 | STG-002 | Storage | IBM/Hitachi/HPE XP plug-in minimum versions post-migration | `Get-StoragePluginHost` (no VBR prefix) | Pass / Manual / Info | Medium - mock-tested |
-| STG-003 | Storage | HPE Nimble/Alletra FIPS-mode OS support | `Get-NimbleHost` (no VBR prefix) | Pass / Warning / Info | Medium - mock-tested |
+| STG-003 | Storage | HPE Nimble/Alletra: some Nimble OS versions may be unsupported when the **Linux-based** backup server runs FIPS-compliant mode — see note. Status is conditional on `FipsCompliantModeEnabled` | `Get-NimbleHost`, `Get-VBRSecurityOptions` | Pass / Manual / Warning / Info | Medium - mock-tested; a Nimble-integrated server is booked for w/c 2026-08-10 |
 | JOB-001 | Jobs | CDP job config not migrated (manual re-create) | `Get-VBRCDPPolicy` | Pass / Warning / Info | Medium - mock-tested |
 | JOB-002 | Jobs | SureBackup SQL Server Checker Script fails on VSA | `Get-VBRApplicationGroup` | Pass / Blocker / Manual | High — both paths validated |
 | JOB-003 | Jobs | Pre/post-job + pre-freeze/post-thaw scripts & CSVs copied manually. Reads all three surfaces — see note below. CSV files remain undetectable and are named as such | `Get-VBRJob`, `Get-VBRJobObject` | Pass / Manual | High — validated |
@@ -65,11 +65,10 @@ v13, #7 local repo accounts are already enforced as limitation checks above.)
 > compare by hand — it does not enumerate sessions, because `Get-VBRBackupSession` has no
 > date filter or ordering, so reading it would materialise every session on the server.
 >
-> A supplied date is **sanity-checked before anything is concluded from it**: a cutoff in
-> the future, or one predating Veeam Backup & Replication itself, returns `Manual`.
-> PowerShell binds `-UpgradeDate 0` to `DateTime.MinValue` without complaint, and that
-> produced "105690 week(s) since the upgrade on 0001-01-01" and a confident `Pass` — a
-> mistyped parameter clearing the very check meant to catch this blocker.
+> The date is **sanity-checked before anything is concluded from it**, because PowerShell
+> binds `-UpgradeDate 0` to `DateTime.MinValue` without complaint — which produced
+> "105690 week(s) since the upgrade on 0001-01-01" and a confident `Pass`, a mistyped
+> parameter clearing the very check meant to catch this blocker.
 
 > **Cmdlet names verified** against the official A-Z reference
 > (`docs/reference/vbr-v13-cmdlets.md`, 1481 cmdlets). Every cmdlet named above
@@ -95,6 +94,47 @@ v13, #7 local repo accounts are already enforced as limitation checks above.)
 | ACTION REQUIRED | any Action, no Blocker | 1 |
 | REVIEW WARNINGS | only Warning/Manual/Info | 0 |
 | READY | all Pass/Skipped | 0 |
+
+## Note on STG-003 — the FIPS restriction is version-dependent, and about the *Linux* server
+
+Verbatim, from the Veeam User Guide → *HPE Alletra 5000, 6000, Nimble* limitations
+(`storage_limitations_nimble.html?ver=13`). **That page is JS-rendered, so it cannot be
+fetched — it has to be read in a browser**, which is why the text is captured here:
+
+> Some versions of Nimble OS may not be supported when the Linux-based backup server
+> operates in FIPS-compliant mode.
+
+Three things follow, and two of them corrected an earlier reading of this check:
+
+1. **It is version-dependent, not categorical.** The arrays are not unsupported under FIPS;
+   *some Nimble OS versions* may not be. So the remediation is to check the array's OS
+   version, and only then to choose between FIPS-compliant mode and continuing to use that
+   array.
+2. **The mode that matters is on the *Linux-based* backup server** — the appliance being
+   migrated *to*. The check reads `FipsCompliantModeEnabled` from
+   `Get-VBRSecurityOptions` on the **source**, which is a signal of intent rather than the
+   condition itself, and it errs safe: nobody is asked to make a decision who is not
+   already running FIPS. The finding says which server the reading came from.
+3. **It is not scoped to Backup from Storage Snapshots.** BfSS appears in a *different*
+   bullet on the same page, and confusing the two produced a finding that named the wrong
+   feature.
+
+Because the restriction is conditional, so is the status: FIPS enabled → `Manual` (a
+decision only the customer can make); FIPS disabled → `Warning` (nothing affected today,
+but enabling it later would mean checking the OS versions first); FIPS unreadable →
+`Manual`, saying so.
+
+### The other two Nimble limitations on that page are deliberately NOT checks
+
+Under the scope rule, KB4800 is the boundary and other sources may only *scope* a
+limitation it already calls out. KB4800 calls out the FIPS/OS-version item, so the UG text
+above legitimately scopes it. The page's other two bullets are not in KB4800 and are not
+migration limitations, so no check is built from them:
+
+- **Nimble Connection Manager on Windows-based backup proxies** (for BfSS over iSCSI) — a
+  configuration *recommendation* that applies equally before and after migration.
+- **Volume Collection replication for backup from secondary arrays** — a prerequisite of
+  that feature, not something migration changes.
 
 ## Note on SEC-005 — the required form differs for a user and a group
 

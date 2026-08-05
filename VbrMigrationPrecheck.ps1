@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.4.5
-#  Built   : 2026-08-05 16:22:34
+#  Version : 0.5.0
+#  Built   : 2026-08-05 16:43:05
 #  Sources : 15 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.4.5'
+$script:PrecheckVersion = '0.5.0'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -1717,18 +1717,62 @@ function Test-NimbleFips {
     if (-not (Test-PrecheckCmdlet 'Get-NimbleHost')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
             -Detail 'HPE Nimble / Alletra integration could not be checked on this server.' `
-            -Recommendation 'If HPE Nimble/Alletra 5000/6000 is integrated, verify the Nimble OS version is supported when the VSA runs in FIPS-compliant mode.'
+            -Recommendation 'If HPE Nimble/Alletra 5000/6000 is integrated, confirm the Nimble OS version on each array is supported when the Linux-based backup server runs in FIPS-compliant mode.'
     }
 
     $hosts = @(Get-NimbleHost -ErrorAction SilentlyContinue)
     if ($hosts.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'The storage inventory on this server was read successfully and contains no HPE Nimble or Alletra 5000/6000 systems, so FIPS-mode OS support does not need review.'
+            -Detail 'The storage inventory on this server was read successfully and contains no HPE Nimble or Alletra 5000/6000 systems, so FIPS-compliant mode does not need review.'
     }
+
+    # UG, HPE Alletra 5000/6000, Nimble limitations: "Some versions of Nimble OS may not
+    # be supported when the Linux-based backup server operates in FIPS-compliant mode."
+    # So it is VERSION-dependent, and the mode that matters is the LINUX server's - i.e.
+    # the appliance being migrated TO. It is NOT scoped to Backup from Storage Snapshots;
+    # that is a separate consideration on the same page (Nimble Connection Manager on
+    # Windows proxies) and is out of KB4800 scope.
+    #
+    # The restriction only bites when FIPS-compliant mode is in use, and that state is
+    # readable: Get-VBRSecurityOptions exposes FipsCompliantModeEnabled. Reading it turns
+    # one undifferentiated warning on every Nimble server into a finding that says whether
+    # this server is actually affected.
+    #
+    # NOTE the mode that ultimately matters is the one on the TARGET appliance, which
+    # cannot be read from here. The setting on this server is the best available signal of
+    # intent, and it errs safe: nobody is asked to make a decision who is not already
+    # running FIPS.
+    $fips = $null
+    if (Test-PrecheckCmdlet 'Get-VBRSecurityOptions') {
+        try {
+            $so = Get-PrecheckCached -Key 'SecurityOptions' -Getter { Get-VBRSecurityOptions -ErrorAction Stop }
+            if ($so -and $so.PSObject.Properties['FipsCompliantModeEnabled']) {
+                $fips = [bool]$so.FipsCompliantModeEnabled
+            }
+        } catch { }
+    }
+
+    $ev = @($hosts | ForEach-Object { "Storage: $($_.Name)" }) +
+          @("FIPS-compliant mode on this server: $(if ($null -eq $fips) { 'could not be read' } else { $fips })")
+
+    if ($fips) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$($hosts.Count) HPE Nimble/Alletra system(s) are integrated and FIPS-compliant mode is enabled on this server. Some Nimble OS versions may not be supported when the Linux-based backup server runs in FIPS-compliant mode, so the Nimble OS version on each array needs checking against that before migrating." `
+            -Recommendation 'Confirm the Nimble OS version on each array is supported with FIPS-compliant mode on a Linux-based backup server. Where it is not, the choice is between FIPS-compliant mode - often not optional in a secure environment - and continuing to use that array with the appliance.' `
+            -Evidence $ev
+    }
+
+    if ($null -eq $fips) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$($hosts.Count) HPE Nimble/Alletra system(s) are integrated, and whether FIPS-compliant mode is enabled could not be read on this server. Some Nimble OS versions may not be supported when the Linux-based backup server runs in FIPS-compliant mode." `
+            -Recommendation 'Check whether FIPS-compliant mode is in use. If it is, confirm the Nimble OS version on each array is supported with FIPS-compliant mode on a Linux-based backup server before migrating.' `
+            -Evidence $ev
+    }
+
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Warning `
-        -Detail "$($hosts.Count) HPE Nimble/Alletra system(s) detected. Some Nimble OS versions may be unsupported when the Veeam Software Appliance runs in FIPS-compliant mode." `
-        -Recommendation 'Verify Nimble OS version support against FIPS mode before migrating (or before enabling FIPS on the VSA).' `
-        -Evidence ($hosts | ForEach-Object { "Storage: $($_.Name)" })
+        -Detail "$($hosts.Count) HPE Nimble/Alletra system(s) are integrated. FIPS-compliant mode is not enabled on this server, so nothing is affected today - but some Nimble OS versions may not be supported when the Linux-based backup server runs in FIPS-compliant mode, so enabling it on the appliance later would mean checking the Nimble OS versions first." `
+        -Recommendation 'If FIPS-compliant mode will be enabled on the Veeam Software Appliance, confirm first that the Nimble OS version on each array is supported with FIPS-compliant mode on a Linux-based backup server.' `
+        -Evidence $ev
 }
 
 # -----------------------------------------------------------------------------

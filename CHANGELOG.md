@@ -17,6 +17,41 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.5.0] - 2026-08-05
+### Changed
+- **STG-003 now decides whether this server is actually affected instead of warning
+  identically on every server with an HPE Nimble or Alletra array.** The restriction is
+  conditional, and the condition is readable: `Get-VBRSecurityOptions` exposes
+  `FipsCompliantModeEnabled`, a property no check had been using. So:
+  - FIPS-compliant mode **enabled** → `Manual`. Only the customer can decide between
+    FIPS-compliant mode — often not optional in a secure environment — and continuing to
+    use that array with the appliance.
+  - FIPS-compliant mode **disabled** → `Warning`. Nothing is affected today, but enabling
+    it on the appliance later would mean checking the Nimble OS versions first.
+  - FIPS state **unreadable** → `Manual` saying so, rather than assuming it is off.
+  - No arrays → `Pass`, unchanged.
+- **Two corrections to what this check claimed**, both from the User Guide's own wording
+  ("Some versions of Nimble OS may not be supported when the Linux-based backup server
+  operates in FIPS-compliant mode"):
+  1. It is **version-dependent, not categorical** — the arrays are not unsupported under
+     FIPS, some Nimble OS versions may not be. The remediation is to check the array's OS
+     version first, and only then to choose.
+  2. It is **not scoped to Backup from Storage Snapshots.** BfSS is a separate
+     consideration on the same page, and naming it here pointed at the wrong feature.
+- The check also records **which server the FIPS reading came from**. The mode that
+  ultimately matters is the one on the *Linux-based* backup server — the appliance being
+  migrated to, which cannot be read from the source. The source setting is a signal of
+  intent, and it errs safe: nobody is asked to decide who is not already running FIPS.
+
+### Added
+- Tests for all four STG-003 branches, mutation-validated (6 mutations, all caught),
+  including that an unreadable FIPS state is not treated as "off" and that a
+  wrong-but-plausible property name is caught.
+- The reference now **quotes the User Guide limitation verbatim**, because that page is
+  JS-rendered and cannot be fetched — it has to be read in a browser. It also records why
+  the *other* two Nimble limitations on that page are deliberately not checks: neither is
+  in KB4800, and neither is a migration limitation.
+
 ## [0.4.5] - 2026-08-05
 ### Fixed
 - **The published checks reference was badly stale, and it is the document that tells a
