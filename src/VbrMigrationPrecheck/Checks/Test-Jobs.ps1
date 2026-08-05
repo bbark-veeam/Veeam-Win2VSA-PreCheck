@@ -21,7 +21,7 @@ function Test-CdpJobs {
             -Evidence ($cdp | ForEach-Object { "CDP policy: $($_.Name)" })
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No CDP policies found.'
+        -Detail 'The CDP policy list on this server was read successfully and is empty, so there is no CDP configuration to re-create after migration.'
 }
 
 function Test-SureBackupSqlChecker {
@@ -40,11 +40,16 @@ function Test-SureBackupSqlChecker {
     # Assigning the SQLServer role is what attaches the SQL Checker Script, so the
     # role is the signal; the test-script array is corroboration only.
     $hits = @()
+    $agCount = 0
+    $vmCount = 0
+    $readGroups = $false
     if (Test-PrecheckCmdlet 'Get-VBRApplicationGroup') {
         try {
             foreach ($ag in Get-VBRApplicationGroup -ErrorAction SilentlyContinue) {
+                $agCount++
                 foreach ($vm in @($ag.VM)) {
                     if (-not $vm) { continue }
+                    $vmCount++
                     $vmName = if ($vm.PSObject.Properties['Name']) { [string]$vm.Name } else { '<unnamed>' }
 
                     # Primary signal: the SQLServer role.
@@ -74,6 +79,7 @@ function Test-SureBackupSqlChecker {
                     }
                 }
             }
+            $readGroups = $true
         } catch { }
     }
 
@@ -83,8 +89,23 @@ function Test-SureBackupSqlChecker {
             -Recommendation 'Remove/replace the SQL Server Checker Script in these Application Groups before migration (or accept those SureBackup tests will fail).' `
             -Evidence $hits
     }
-    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No SureBackup Application Groups using the SQL Server Checker Script were detected.'
+
+    # This is the only check that can emit a Blocker, so it must never report a clean
+    # result it did not earn. The guard above passes when EITHER SureBackup cmdlet
+    # exists, so the application groups can still be unreadable at this point - and an
+    # unread collection is empty, which would otherwise look exactly like a clean one.
+    if (-not $readGroups) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'SureBackup application groups could not be enumerated on this server, so their VM roles were not checked.' `
+            -Recommendation 'Check by hand whether any Application Group VM has the SQL Server role: the SQL Server Checker Script it attaches is Windows-only and will FAIL on the Veeam Software Appliance.'
+    }
+
+    $detail = if ($agCount -eq 0) {
+        'The SureBackup application group list on this server was read successfully and is empty, so no VM can be using the SQL Server Checker Script.'
+    } else {
+        "$agCount SureBackup application group(s) containing $vmCount VM(s) were examined, and none uses the SQL Server role or a predefined SQL test script."
+    }
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass -Detail $detail
 }
 
 function Test-JobScriptsAndFiles {

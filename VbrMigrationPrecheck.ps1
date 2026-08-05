@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.4.1
-#  Built   : 2026-08-05 11:41:59
+#  Version : 0.4.2
+#  Built   : 2026-08-05 14:17:09
 #  Sources : 15 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.4.1'
+$script:PrecheckVersion = '0.4.2'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -347,7 +347,7 @@ function Test-AgentVersions {
     $computers = @(Get-VBRDiscoveredComputer -ErrorAction SilentlyContinue)
     if ($computers.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No discovered/managed agent computers found.'
+            -Detail 'The discovered-computer inventory on this server was read successfully and is empty, so no managed agent needs upgrading.'
     }
 
     # Probe for a version-bearing property; names differ across builds.
@@ -459,20 +459,44 @@ function Test-MacAgentDomainAuth {
     }
 
     $macJobs = @()
+    $jobCount = 0
+    $readJobs = $false
     try {
-        $macJobs = @(Get-VBRComputerBackupJob -ErrorAction SilentlyContinue |
-            Where-Object { "$($_.OSPlatform) $($_.Type) $($_.TypeToString)" -match 'Mac|OSX|macOS' } |
+        $all = @(Get-VBRComputerBackupJob -ErrorAction SilentlyContinue)
+        $jobCount = $all.Count
+        # Whole words only. A bare substring match on 'Mac' also matches the word
+        # "machine", which these type strings are very likely to contain, and that
+        # reported ordinary Windows agent jobs as Mac jobs on every server - the same
+        # mistake that made AGT-004 flag the built-in "Manually Added" group. The
+        # exact OSPlatform vocabulary is still unconfirmed (see LAB-PLAN), so this
+        # stays a word match rather than an enum comparison for now.
+        $macJobs = @($all |
+            Where-Object { "$($_.OSPlatform) $($_.Type) $($_.TypeToString)" -match '\b(mac|osx|macos)\b' } |
             ForEach-Object { $_.Name })
+        $readJobs = $true
     } catch { }
 
     if ($macJobs.Count -gt 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-            -Detail "$($macJobs.Count) possible Veeam Agent for Mac job(s) found." `
+            -Detail "$($macJobs.Count) of $jobCount agent job(s) on this server look like Veeam Agent for Mac jobs." `
             -Recommendation 'Confirm none connect using a domain account. Any that do must be reconfigured to a local user account before migration.' `
             -Evidence $macJobs
     }
-    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No Veeam Agent for Mac jobs detected.'
+
+    if (-not $readJobs) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Agent jobs could not be enumerated on this server, so Mac agent authentication was not checked.' `
+            -Recommendation 'Any Veeam Agent for Mac job connecting with a DOMAIN account must be reconfigured to use a LOCAL user account (Mac agent = no Kerberos; VSA = no NTLM).'
+    }
+
+    # The denominator matters here: this check identifies Mac jobs by platform
+    # strings, so "no Mac jobs" is only meaningful alongside how many jobs it read.
+    $detail = if ($jobCount -eq 0) {
+        'The agent job list on this server was read successfully and is empty, so no Veeam Agent for Mac job exists.'
+    } else {
+        "$jobCount agent job(s) were examined and none of them is a Veeam Agent for Mac job, so no Mac agent authentication needs changing."
+    }
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass -Detail $detail
 }
 
 function Test-ProtectionGroupPostMigration {
@@ -493,9 +517,11 @@ function Test-ProtectionGroupPostMigration {
     $groups = @()
     $preInstalled = @()
     $evidence = @()
+    $readGroups = $false
     if (Test-PrecheckCmdlet 'Get-VBRProtectionGroup') {
         try {
             $groups = @(Get-VBRProtectionGroup -ErrorAction SilentlyContinue)
+            $readGroups = $true
             foreach ($g in $groups) {
                 $ct = ''
                 try { if ($g.Container) { $ct = "$($g.Container.Type)" } } catch { }
@@ -507,9 +533,20 @@ function Test-ProtectionGroupPostMigration {
         } catch { }
     }
 
+    # An unread collection is empty, and this check's clean result used to be reached
+    # by falling through that empty collection - so a missing or throwing cmdlet
+    # produced "no Protection Groups found" rather than saying it could not look.
+    # Every other check fails safe to Manual/Info here; this one failed OPEN, and the
+    # finding it suppresses is a post-migration instruction the operator never sees.
+    if (-not $readGroups) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Protection Groups could not be enumerated on this server, so none could be examined.' `
+            -Recommendation 'After migration, rescan every Protection Group. Any Protection Group for Computers with Pre-installed Backup Agents must also be reconfigured with a new configuration file.'
+    }
+
     if ($groups.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No Protection Groups found (no post-migration rescan needed).'
+            -Detail 'The Protection Group list on this server was read successfully and is empty, so no post-migration rescan is needed.'
     }
 
     $detail = "$($groups.Count) Protection Group(s) present. After migration ALL Protection Groups must be rescanned."
@@ -759,7 +796,7 @@ function Test-EntraIdBackups {
             -Evidence ($tenants | ForEach-Object { "Entra ID tenant: $($_.Name)" })
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No Microsoft Entra ID tenant backups found.'
+        -Detail 'The Entra ID tenant inventory on this server was read successfully and is empty, so no Entra ID backup data is affected by the migration.'
 }
 
 # -----------------------------------------------------------------------------
@@ -924,7 +961,7 @@ function Test-CdpJobs {
             -Evidence ($cdp | ForEach-Object { "CDP policy: $($_.Name)" })
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No CDP policies found.'
+        -Detail 'The CDP policy list on this server was read successfully and is empty, so there is no CDP configuration to re-create after migration.'
 }
 
 function Test-SureBackupSqlChecker {
@@ -943,11 +980,16 @@ function Test-SureBackupSqlChecker {
     # Assigning the SQLServer role is what attaches the SQL Checker Script, so the
     # role is the signal; the test-script array is corroboration only.
     $hits = @()
+    $agCount = 0
+    $vmCount = 0
+    $readGroups = $false
     if (Test-PrecheckCmdlet 'Get-VBRApplicationGroup') {
         try {
             foreach ($ag in Get-VBRApplicationGroup -ErrorAction SilentlyContinue) {
+                $agCount++
                 foreach ($vm in @($ag.VM)) {
                     if (-not $vm) { continue }
+                    $vmCount++
                     $vmName = if ($vm.PSObject.Properties['Name']) { [string]$vm.Name } else { '<unnamed>' }
 
                     # Primary signal: the SQLServer role.
@@ -977,6 +1019,7 @@ function Test-SureBackupSqlChecker {
                     }
                 }
             }
+            $readGroups = $true
         } catch { }
     }
 
@@ -986,8 +1029,23 @@ function Test-SureBackupSqlChecker {
             -Recommendation 'Remove/replace the SQL Server Checker Script in these Application Groups before migration (or accept those SureBackup tests will fail).' `
             -Evidence $hits
     }
-    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No SureBackup Application Groups using the SQL Server Checker Script were detected.'
+
+    # This is the only check that can emit a Blocker, so it must never report a clean
+    # result it did not earn. The guard above passes when EITHER SureBackup cmdlet
+    # exists, so the application groups can still be unreadable at this point - and an
+    # unread collection is empty, which would otherwise look exactly like a clean one.
+    if (-not $readGroups) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'SureBackup application groups could not be enumerated on this server, so their VM roles were not checked.' `
+            -Recommendation 'Check by hand whether any Application Group VM has the SQL Server role: the SQL Server Checker Script it attaches is Windows-only and will FAIL on the Veeam Software Appliance.'
+    }
+
+    $detail = if ($agCount -eq 0) {
+        'The SureBackup application group list on this server was read successfully and is empty, so no VM can be using the SQL Server Checker Script.'
+    } else {
+        "$agCount SureBackup application group(s) containing $vmCount VM(s) were examined, and none uses the SQL Server role or a predefined SQL test script."
+    }
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass -Detail $detail
 }
 
 function Test-JobScriptsAndFiles {
@@ -1284,21 +1342,26 @@ function Test-CredentialUpnFormat {
     }
 
     $candidates = @()
+    $examined = 0
+    $setAside = 0
+    $acceptable = 0
+    $readCreds = $false
     try {
         foreach ($c in Get-VBRCredentials -ErrorAction SilentlyContinue) {
             $u = [string]$c.Name
             if (-not $u) { continue }
+            $examined++
 
             # Standard type only. Excludes SSH, SSH private key, Kasten auth token,
             # Managed Service Account, and anything new that appears later.
             $type = if ($c.PSObject.Properties['Type']) { [string]$c.Type } else { '' }
-            if ($type -and $type -ne 'Standard') { continue }
+            if ($type -and $type -ne 'Standard') { $setAside++; continue }
 
             # Linux / appliance / ESXi root, incl. VBR's own auto-created records.
-            if ($u -ieq 'root') { continue }
+            if ($u -ieq 'root') { $setAside++; continue }
 
             # Already UPN-shaped (or an SSO/IdP suffix form) - not a candidate.
-            if ($u -match '@') { continue }
+            if ($u -match '@') { $acceptable++; continue }
 
             # FQDN\user is an accepted Kerberos form alongside user@fqdn - the Add
             # Windows Server wizard asks for "USER@FQDN or FQDN\USER". A prefix
@@ -1306,17 +1369,34 @@ function Test-CredentialUpnFormat {
             # is a NetBIOS domain or a machine name, and neither can authenticate
             # with Kerberos.
             $prefix = if ($u -match '\\') { $u.Split('\')[0] } else { '' }
-            if ($prefix -and $prefix.Contains('.')) { continue }
+            if ($prefix -and $prefix.Contains('.')) { $acceptable++; continue }
 
             $shape = if ($prefix) { 'NetBIOS or machine prefix' } else { 'bare user name' }
             $desc  = if ($c.PSObject.Properties['Description']) { [string]$c.Description } else { '' }
             $candidates += "$u  [$shape]$(if ($desc) { "  - $desc" })"
         }
+        $readCreds = $true
     } catch { }
 
     if ($candidates.Count -eq 0) {
-        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'All stored domain credentials are already in a Kerberos-compatible form (user@fqdn or fqdn\user), so nothing needs review for Kerberos-authenticated connections.'
+        if (-not $readCreds) {
+            return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+                -Detail 'The stored credentials on this server could not be enumerated, so their format was not checked.' `
+                -Recommendation 'Review manually: connections that authenticate with Kerberos - Windows servers added to the backup infrastructure, guest OS processing of Windows VMs, Windows agent management - need an Active Directory account in user@fqdn or fqdn\user form.'
+        }
+
+        # Says which credentials were judged and which were deliberately not. Most
+        # servers carry several records VBR created itself, so a bare "all clear"
+        # hides whether anything was actually in scope.
+        $detail = if ($examined -eq 0) {
+            'The stored credential list on this server was read successfully and is empty.'
+        }
+        else {
+            "$examined stored credential(s) were examined and none uses a NetBIOS domain prefix, a machine prefix, or a bare user name, so nothing needs review for Kerberos-authenticated connections." +
+            "$(if ($acceptable) { " $acceptable are already in user@fqdn or fqdn\user form." })" +
+            "$(if ($setAside)   { " $setAside were set aside as not applying to Kerberos paths (SSH, key, token or managed-service credentials, and 'root' accounts)." })"
+        }
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass -Detail $detail
     }
 
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
@@ -1549,8 +1629,10 @@ function Test-NetAppOntapRole {
 
     $hosts = @(Get-NetAppHost -ErrorAction SilentlyContinue)
     if ($hosts.Count -eq 0) {
+        # Says the inventory was read and was empty. A bare "none found" reads the
+        # same whether it looked and found nothing or never looked at all.
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No NetApp ONTAP storage integration found.'
+            -Detail 'The storage inventory on this server was read successfully and contains no NetApp ONTAP systems, so no ONTAP role needs review.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Warning `
         -Detail "$($hosts.Count) NetApp ONTAP system(s) integrated. Only the NAS filer role is supported on the Veeam Software Appliance; other roles cannot migrate." `
@@ -1575,7 +1657,7 @@ function Test-StoragePluginVersions {
     $hosts = @(Get-PrecheckCached -Key 'StoragePluginHosts' -Getter { Get-StoragePluginHost -ErrorAction SilentlyContinue })
     if ($hosts.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No Universal Storage Plugin integrations detected (IBM FlashSystem / Hitachi / HPE XP).'
+            -Detail 'The Universal Storage Plugin inventory on this server was read successfully and contains no systems, so no IBM FlashSystem, Hitachi or HPE XP plug-in version applies.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
         -Detail "$($hosts.Count) Universal Storage Plugin system(s) detected. These have minimum plug-in versions on the VSA." `
@@ -1597,7 +1679,7 @@ function Test-NimbleFips {
     $hosts = @(Get-NimbleHost -ErrorAction SilentlyContinue)
     if ($hosts.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No HPE Nimble / Alletra 5000/6000 integration detected.'
+            -Detail 'The storage inventory on this server was read successfully and contains no HPE Nimble or Alletra 5000/6000 systems, so FIPS-mode OS support does not need review.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Warning `
         -Detail "$($hosts.Count) HPE Nimble/Alletra system(s) detected. Some Nimble OS versions may be unsupported when the Veeam Software Appliance runs in FIPS-compliant mode." `

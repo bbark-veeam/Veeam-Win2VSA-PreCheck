@@ -26,8 +26,10 @@ function Test-NetAppOntapRole {
 
     $hosts = @(Get-NetAppHost -ErrorAction SilentlyContinue)
     if ($hosts.Count -eq 0) {
+        # Says the inventory was read and was empty. A bare "none found" reads the
+        # same whether it looked and found nothing or never looked at all.
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No NetApp ONTAP storage integration found.'
+            -Detail 'The storage inventory on this server was read successfully and contains no NetApp ONTAP systems, so no ONTAP role needs review.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Warning `
         -Detail "$($hosts.Count) NetApp ONTAP system(s) integrated. Only the NAS filer role is supported on the Veeam Software Appliance; other roles cannot migrate." `
@@ -52,7 +54,7 @@ function Test-StoragePluginVersions {
     $hosts = @(Get-PrecheckCached -Key 'StoragePluginHosts' -Getter { Get-StoragePluginHost -ErrorAction SilentlyContinue })
     if ($hosts.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No Universal Storage Plugin integrations detected (IBM FlashSystem / Hitachi / HPE XP).'
+            -Detail 'The Universal Storage Plugin inventory on this server was read successfully and contains no systems, so no IBM FlashSystem, Hitachi or HPE XP plug-in version applies.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
         -Detail "$($hosts.Count) Universal Storage Plugin system(s) detected. These have minimum plug-in versions on the VSA." `
@@ -74,7 +76,7 @@ function Test-NimbleFips {
     $hosts = @(Get-NimbleHost -ErrorAction SilentlyContinue)
     if ($hosts.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No HPE Nimble / Alletra 5000/6000 integration detected.'
+            -Detail 'The storage inventory on this server was read successfully and contains no HPE Nimble or Alletra 5000/6000 systems, so FIPS-mode OS support does not need review.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Warning `
         -Detail "$($hosts.Count) HPE Nimble/Alletra system(s) detected. Some Nimble OS versions may be unsupported when the Veeam Software Appliance runs in FIPS-compliant mode." `

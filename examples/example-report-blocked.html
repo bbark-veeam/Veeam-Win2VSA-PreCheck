@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VBR to VSA Migration Precheck</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; background:#f4f6f8; color:#1c2833; }
+  @media (prefers-color-scheme: dark){ body{ background:#12171d; color:#e6eaee } .card,.legend,table{ background:#1b222b !important } td,th{ border-color:#2b333d !important } .detail{ color:#9aa7b4 !important } }
+  header { background:#0b3d5c; color:#fff; padding:22px 28px; }
+  header h1 { margin:0 0 4px; font-size:20px; }
+  header .meta { font-size:13px; opacity:.85 }
+  .wrap { max-width:1100px; margin:0 auto; padding:20px 28px 60px; }
+  .verdict { display:inline-block; padding:10px 18px; border-radius:8px; color:#fff; font-weight:700; font-size:18px; background:#c0392b; margin:18px 0 8px; }
+  .counts { font-size:13px; color:#566573; margin-bottom:18px; }
+  .nextsteps { margin-top:26px; border:1px solid #1f6feb; border-radius:10px; padding:6px 20px 14px; background:#eef4ff; }
+  @media (prefers-color-scheme: dark){ .nextsteps{ background:#12203a !important; border-color:#1f6feb } }
+  .nextsteps h2 { font-size:16px; color:#1f6feb; margin:14px 0 2px; }
+  .nsintro { font-size:13px; color:#566573; margin:0 0 8px; }
+  .nslist { list-style:none; margin:0; padding:0; }
+  .nsitem { padding:10px 0; border-top:1px solid #d5e2fb; }
+  .nsitem:first-child { border-top:none; }
+  .card { background:#fff; border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden; }
+  table { width:100%; border-collapse:collapse; background:#fff; }
+  th,td { text-align:left; padding:11px 14px; border-bottom:1px solid #e5e9ed; vertical-align:top; font-size:14px; }
+  th { background:#eef2f5; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#566573; }
+  .pill { color:#fff; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; letter-spacing:.03em; white-space:nowrap; }
+  .mono { font-family:ui-monospace, Menlo, Consolas, monospace; font-size:12px; color:#566573; white-space:nowrap; }
+  .title { font-weight:600; }
+  .detail { color:#566573; margin-top:3px; }
+  .rec { margin-top:5px; color:#0b6; font-weight:600; }
+  .ev { margin:6px 0 0; padding-left:18px; color:#7f8c8d; font-size:13px; }
+  .cat { color:#7f8c8d; font-size:13px; white-space:nowrap; }
+  footer { max-width:1100px; margin:0 auto; padding:0 28px 40px; color:#7f8c8d; font-size:12px; }
+</style></head>
+<body>
+<header>
+  <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
+  <div class="meta">Server: BACKUP02.corp.local &nbsp;|&nbsp;
+    Build: Veeam Backup &amp; Replication 13.1.0.411 &nbsp;|&nbsp;
+    Generated: 2026-08-05 14:21:05 -04:00 &nbsp;|&nbsp;
+    Precheck version: 0.4.2 &nbsp;|&nbsp;
+    Reference: KB4800 (captured 2026-07-24)</div>
+</header>
+<div class="wrap">
+  <div class="verdict">MIGRATION BLOCKED</div>
+  <div class="counts">25 checks &nbsp;&bull;&nbsp; Blocker 3 &nbsp;&bull;&nbsp; Action 5 &nbsp;&bull;&nbsp; Warning 2 &nbsp;&bull;&nbsp; Manual 6 &nbsp;&bull;&nbsp; NextStep 2 &nbsp;&bull;&nbsp; Info 0 &nbsp;&bull;&nbsp; Pass 5 &nbsp;&bull;&nbsp; Skipped 2</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Status</th><th>ID</th><th>Check</th><th>Category</th></tr></thead>
+      <tbody>
+        <tr>
+  <td><span class="pill" style="background:#c0392b">Blocker</span></td>
+  <td class="mono">DEP-001</td>
+  <td>
+    <div class="title">Cloud Connect deployment</div>
+    <div class="detail">This is a Veeam Cloud Connect deployment - the installed license reports CloudConnect = Enabled (2 tenant(s), 1 gateway(s) found). Cloud Connect deployments cannot be migrated to the Veeam Software Appliance.</div>
+    <div class='rec'>&#8594; Cloud Connect deployments are not migratable. Do not proceed via this process.</div>
+    <ul class='ev'><li>License CloudConnect mode: Enabled</li><li>Tenant: tenant-a</li><li>Tenant: tenant-b</li><li>Gateway: cc-gateway-01</li></ul>
+  </td>
+  <td class="cat">Deployment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#c0392b">Blocker</span></td>
+  <td class="mono">ENV-001</td>
+  <td>
+    <div class="title">Source VBR version</div>
+    <div class="detail">Detected build 13.1.0.411 (&#39;Veeam Backup &amp; Replication 13.1.0.411&#39;). Migration from a Windows VBR 13.1 source is NOT possible.</div>
+    <div class='rec'>&#8594; Do not migrate from 13.1. Migration is supported from the 13.0.x train - use a source running the latest available 13.0.x patch.</div>
+    
+  </td>
+  <td class="cat">Environment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#c0392b">Blocker</span></td>
+  <td class="mono">JOB-002</td>
+  <td>
+    <div class="title">SureBackup SQL Server Checker Script</div>
+    <div class="detail">SureBackup Application Group(s) appear to use the SQL Server Checker Script, which is available ONLY on Windows deployments and will FAIL on the VSA.</div>
+    <div class='rec'>&#8594; Remove/replace the SQL Server Checker Script in these Application Groups before migration (or accept those SureBackup tests will fail).</div>
+    <ul class='ev'><li>Application Group &#39;SQL application group&#39; -&gt; VM &#39;SQL01&#39; (role(s): SQLServer)</li></ul>
+  </td>
+  <td class="cat">Jobs</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#8e44ad">Action</span></td>
+  <td class="mono">AGT-001</td>
+  <td>
+    <div class="title">Managed agent versions</div>
+    <div class="detail">1 managed agent(s) are below v13. The VSA requires all agents to be v13+ to connect.</div>
+    <div class='rec'>&#8594; Upgrade these agents to v13 before migration. Any host on an OS not supported by the v13 agent will be unable to connect afterward.</div>
+    <ul class='ev'><li>LEGACY01 (agent 12.1.2.172)</li></ul>
+  </td>
+  <td class="cat">Agents</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#8e44ad">Action</span></td>
+  <td class="mono">AGT-002</td>
+  <td>
+    <div class="title">Disabled agent backup policies</div>
+    <div class="detail">1 of 2 Agent Backup Policy/policies are disabled. A disabled policy must have had its configuration applied successfully, or migration will fail. Whether that already happened is not something this check can read.</div>
+    <div class='rec'>&#8594; For each policy below, apply/sync its configuration successfully before migrating - or delete the policy if it is no longer wanted.</div>
+    <ul class='ev'><li>Retired policy  [ManagedByAgent]</li></ul>
+  </td>
+  <td class="cat">Agents</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#8e44ad">Action</span></td>
+  <td class="mono">ENV-002</td>
+  <td>
+    <div class="title">License type</div>
+    <div class="detail">A socket-based license is installed (4 licensed socket(s)). The Veeam Software Appliance supports ONLY instance-based VUL.</div>
+    <div class='rec'>&#8594; Migrate the socket-based license to a Veeam Universal License (VUL) before proceeding.</div>
+    <ul class='ev'><li>Type=Perpetual</li><li>Edition=EnterprisePlus</li><li>InstanceLicenseSummary=</li><li>SocketLicenseSummary entries=1</li><li>Licensed sockets counted=4</li></ul>
+  </td>
+  <td class="cat">Environment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#8e44ad">Action</span></td>
+  <td class="mono">SEC-004</td>
+  <td>
+    <div class="title">Repository access accounts</div>
+    <div class="detail">1 machine-local account(s) are granted access to a repository. Their SIDs do not exist on the Veeam Software Appliance, so migration reports &#39;SID not found&#39;.</div>
+    <div class='rec'>&#8594; Remove these machine-local accounts from the repository access permissions before migrating, replacing them with domain accounts where the access is still needed.</div>
+    <ul class='ev'><li>Default Backup Repository: BACKUP02\Administrator  [machine-local account]</li></ul>
+  </td>
+  <td class="cat">Security</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#8e44ad">Action</span></td>
+  <td class="mono">SEC-005</td>
+  <td>
+    <div class="title">Console role assignment format</div>
+    <div class="detail">2 console role assignment(s) are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created.</div>
+    <div class='rec'>&#8594; Before migrating, re-create each assignment below in the appliance form: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: &quot;Specify a username in the UPN format (username@domain.com).&quot;</div>
+    <ul class='ev'><li>Administrators  [Group, role: BackupAdmin]  -&gt; unqualified name - the appliance needs group@domain</li><li>CORP\Administrator  [User, role: BackupAdmin]  -&gt; prefixed form - the appliance needs user@fqdn</li></ul>
+  </td>
+  <td class="cat">Security</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#d68910">Warning</span></td>
+  <td class="mono">JOB-001</td>
+  <td>
+    <div class="title">CDP policies</div>
+    <div class="detail">1 CDP policy/policies found. CDP job configuration is NOT migrated.</div>
+    <div class='rec'>&#8594; Document these CDP policies now; they must be reconfigured manually on the Veeam Software Appliance after migration.</div>
+    <ul class='ev'><li>CDP policy: CDP-Tier1</li></ul>
+  </td>
+  <td class="cat">Jobs</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#d68910">Warning</span></td>
+  <td class="mono">STG-001</td>
+  <td>
+    <div class="title">NetApp ONTAP role</div>
+    <div class="detail">1 NetApp ONTAP system(s) integrated. Only the NAS filer role is supported on the Veeam Software Appliance; other roles cannot migrate.</div>
+    <div class='rec'>&#8594; Confirm each NetApp ONTAP system is used only in the NAS filer role. Any other storage-snapshot role will not migrate.</div>
+    <ul class='ev'><li>NetApp: ontap-cluster-01</li></ul>
+  </td>
+  <td class="cat">Storage</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">AGT-004</td>
+  <td>
+    <div class="title">Protection group post-migration steps</div>
+    <div class="detail">2 Protection Group(s) present. After migration ALL Protection Groups must be rescanned. 1 group(s) appear to use Computers with Pre-installed Backup Agents, which must be reconfigured with a NEW configuration file.</div>
+    <div class='rec'>&#8594; Post-migration: rescan every Protection Group. Protection Groups for Computers with Pre-installed Backup Agents must be reconfigured with a new configuration file.</div>
+    <ul class='ev'><li>Protection Group: Office workstations  [ActiveDirectory]</li><li>Protection Group: Remote laptops  [ManuallyDeployed]</li></ul>
+  </td>
+  <td class="cat">Agents</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">DB-001</td>
+  <td>
+    <div class="title">Session-history retention</div>
+    <div class="detail">Session history is kept for 13 week(s). Sessions predating the environment upgrade cause migration to fail, and this check cannot tell whether 13 week(s) reaches back past that upgrade without knowing its date.</div>
+    <div class='rec'>&#8594; Compare 13 week(s) against the date this environment was upgraded. If the window reaches back before the upgrade, reduce it so those sessions age out. Re-run with -UpgradeDate &lt;date&gt; to have this decided automatically.</div>
+    <ul class='ev'><li>KeepAllSessions=False</li><li>RetentionLimitWeeks=13</li></ul>
+  </td>
+  <td class="cat">Job history</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">DEP-003</td>
+  <td>
+    <div class="title">Entra ID tenant backups</div>
+    <div class="detail">1 Microsoft Entra ID tenant backup(s) found. Primary Entra ID backup DATA is not migrated and remains on the original PostgreSQL instance.</div>
+    <div class='rec'>&#8594; Follow one of the three documented Entra ID data procedures in KB4800 before/after migration. Manual intervention is required.</div>
+    <ul class='ev'><li>Entra ID tenant: contoso.onmicrosoft.com</li></ul>
+  </td>
+  <td class="cat">Deployment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">SEC-001</td>
+  <td>
+    <div class="title">Four-eyes authorization</div>
+    <div class="detail">Four-eyes authorization state is not exposed to PowerShell.</div>
+    <div class='rec'>&#8594; Check it in the console under Users &amp; Roles &gt; Authorization tab. If it is enabled, plan to re-enable it on the Veeam Software Appliance after migration. This step cannot be automated and will need doing on every server.</div>
+    
+  </td>
+  <td class="cat">Security</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">SEC-002</td>
+  <td>
+    <div class="title">Credential format for Kerberos connections</div>
+    <div class="detail">1 credential(s) use a NetBIOS domain prefix, a machine prefix, or a bare user name. Connections that authenticate with Kerberos - Windows servers added to the backup infrastructure, guest OS processing of Windows VMs, and Windows agent management - need an Active Directory account in user@fqdn or fqdn\user form. A machine-local account cannot authenticate with Kerberos at all.</div>
+    <div class='rec'>&#8594; Review each credential below against where it is used. Where the connection authenticates with Kerberos, re-enter the account as user@fqdn or fqdn\user (a machine-local account must be replaced with a domain account). Credentials used only for vSphere host connections are documented as taking MACHINE\USER or DOMAIN\USER format and do not need changing.</div>
+    <ul class='ev'><li>CORP\svc-veeam  [NetBIOS or machine prefix]  - Guest processing</li></ul>
+  </td>
+  <td class="cat">Security</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">SEC-003</td>
+  <td>
+    <div class="title">Trusted-domain authentication</div>
+    <div class="detail">The Veeam Software Appliance does not support trusted-domain authentication.</div>
+    <div class='rec'>&#8594; Confirm no credentials/servers authenticate across a domain trust (accounts from a trusted, non-primary domain). Such access must be reworked before migration.</div>
+    
+  </td>
+  <td class="cat">Security</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">AGT-003</td>
+  <td>
+    <div class="title">Veeam Agent for Mac authentication</div>
+    <div class="detail">2 agent job(s) were examined and none of them is a Veeam Agent for Mac job, so no Mac agent authentication needs changing.</div>
+    
+    
+  </td>
+  <td class="cat">Agents</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">DEP-002</td>
+  <td>
+    <div class="title">Google Cloud plug-in</div>
+    <div class="detail">No Google Cloud configuration found. 2 Google Cloud configuration source(s) were checked and no job references Google Cloud. Note the plug-in itself ships with VBR, so it is installed regardless - only configuration matters here. Google Cloud external repositories are not examined.</div>
+    
+    
+  </td>
+  <td class="cat">Deployment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">JOB-003</td>
+  <td>
+    <div class="title">Job and guest-processing scripts</div>
+    <div class="detail">No scripts are configured on any job - pre/post-job commands, job-level guest scripts, and per-machine guest script overrides were all checked. CSV files read by a job cannot be detected; confirm those by hand.</div>
+    
+    
+  </td>
+  <td class="cat">Jobs</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#95a5a6">Skipped</span></td>
+  <td class="mono">PRE-003</td>
+  <td>
+    <div class="title">File-to-tape source hostname</div>
+    <div class="detail">No file-to-tape jobs detected; source-hostname step not applicable.</div>
+    
+    
+  </td>
+  <td class="cat">Preparation</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#95a5a6">Skipped</span></td>
+  <td class="mono">PRE-004</td>
+  <td>
+    <div class="title">Appliance timezone (Hitachi / HPE XP)</div>
+    <div class="detail">No Universal Storage Plugin (Hitachi/HPE XP) systems detected; timezone-alignment step not applicable.</div>
+    
+    
+  </td>
+  <td class="cat">Preparation</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">STG-002</td>
+  <td>
+    <div class="title">Universal Storage Plugin versions</div>
+    <div class="detail">The Universal Storage Plugin inventory on this server was read successfully and contains no systems, so no IBM FlashSystem, Hitachi or HPE XP plug-in version applies.</div>
+    
+    
+  </td>
+  <td class="cat">Storage</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">STG-003</td>
+  <td>
+    <div class="title">HPE Nimble / Alletra FIPS support</div>
+    <div class="detail">The storage inventory on this server was read successfully and contains no HPE Nimble or Alletra 5000/6000 systems, so FIPS-mode OS support does not need review.</div>
+    
+    
+  </td>
+  <td class="cat">Storage</td>
+</tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="nextsteps">
+    <h2>Pre-Migration Next Steps (2)</h2>
+    <p class="nsintro">KB4800 preparation actions that apply to this environment &mdash; complete these before starting the migration.</p>
+    <ul class="nslist">
+      <li class="nsitem">
+  <div class="title"><span class="mono">PRE-001</span> &nbsp; Entra ID secondary target</div>
+  <div class="detail">1 Entra ID tenant backup(s) present. Primary Entra ID data is NOT migrated (stays on the source PostgreSQL).</div>
+  <div class='rec'>&#8594; Before migrating, configure a secondary destination repository for each Entra ID tenant backup (New-/Set-VBREntraIDBackupSecondaryTarget) to preserve backup continuity.</div>
+  <ul class='ev'><li>Entra ID tenant: contoso.onmicrosoft.com</li></ul>
+</li>
+<li class="nsitem">
+  <div class="title"><span class="mono">PRE-002</span> &nbsp; Machine reachability from the appliance</div>
+  <div class="detail">3 managed server(s)/host(s) are registered. Each must be reachable from the VSA after migration.</div>
+  <div class='rec'>&#8594; Before migrating, verify network connectivity, firewall rules, and DNS resolution from the Veeam Software Appliance to every managed machine (hosts, proxies, repositories, agents).</div>
+  <ul class='ev'><li>Managed server: backup01.corp.local [Local]</li><li>Managed server: proxy01.corp.local [Windows]</li><li>Managed server: repo01.corp.local [Linux]</li></ul>
+</li>
+    </ul>
+  </div>
+</div>
+<footer>
+  Generated by VbrMigrationPrecheck. This report evaluates the known limitations in Veeam KB4800 and is provided as guidance;
+  it does not guarantee migration success. Verify Info/Manual items by hand.
+</footer>
+</body></html>

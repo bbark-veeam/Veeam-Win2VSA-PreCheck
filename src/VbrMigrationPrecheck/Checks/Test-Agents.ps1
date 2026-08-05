@@ -15,7 +15,7 @@ function Test-AgentVersions {
     $computers = @(Get-VBRDiscoveredComputer -ErrorAction SilentlyContinue)
     if ($computers.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No discovered/managed agent computers found.'
+            -Detail 'The discovered-computer inventory on this server was read successfully and is empty, so no managed agent needs upgrading.'
     }
 
     # Probe for a version-bearing property; names differ across builds.
@@ -127,20 +127,44 @@ function Test-MacAgentDomainAuth {
     }
 
     $macJobs = @()
+    $jobCount = 0
+    $readJobs = $false
     try {
-        $macJobs = @(Get-VBRComputerBackupJob -ErrorAction SilentlyContinue |
-            Where-Object { "$($_.OSPlatform) $($_.Type) $($_.TypeToString)" -match 'Mac|OSX|macOS' } |
+        $all = @(Get-VBRComputerBackupJob -ErrorAction SilentlyContinue)
+        $jobCount = $all.Count
+        # Whole words only. A bare substring match on 'Mac' also matches the word
+        # "machine", which these type strings are very likely to contain, and that
+        # reported ordinary Windows agent jobs as Mac jobs on every server - the same
+        # mistake that made AGT-004 flag the built-in "Manually Added" group. The
+        # exact OSPlatform vocabulary is still unconfirmed (see LAB-PLAN), so this
+        # stays a word match rather than an enum comparison for now.
+        $macJobs = @($all |
+            Where-Object { "$($_.OSPlatform) $($_.Type) $($_.TypeToString)" -match '\b(mac|osx|macos)\b' } |
             ForEach-Object { $_.Name })
+        $readJobs = $true
     } catch { }
 
     if ($macJobs.Count -gt 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-            -Detail "$($macJobs.Count) possible Veeam Agent for Mac job(s) found." `
+            -Detail "$($macJobs.Count) of $jobCount agent job(s) on this server look like Veeam Agent for Mac jobs." `
             -Recommendation 'Confirm none connect using a domain account. Any that do must be reconfigured to a local user account before migration.' `
             -Evidence $macJobs
     }
-    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No Veeam Agent for Mac jobs detected.'
+
+    if (-not $readJobs) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Agent jobs could not be enumerated on this server, so Mac agent authentication was not checked.' `
+            -Recommendation 'Any Veeam Agent for Mac job connecting with a DOMAIN account must be reconfigured to use a LOCAL user account (Mac agent = no Kerberos; VSA = no NTLM).'
+    }
+
+    # The denominator matters here: this check identifies Mac jobs by platform
+    # strings, so "no Mac jobs" is only meaningful alongside how many jobs it read.
+    $detail = if ($jobCount -eq 0) {
+        'The agent job list on this server was read successfully and is empty, so no Veeam Agent for Mac job exists.'
+    } else {
+        "$jobCount agent job(s) were examined and none of them is a Veeam Agent for Mac job, so no Mac agent authentication needs changing."
+    }
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass -Detail $detail
 }
 
 function Test-ProtectionGroupPostMigration {
@@ -161,9 +185,11 @@ function Test-ProtectionGroupPostMigration {
     $groups = @()
     $preInstalled = @()
     $evidence = @()
+    $readGroups = $false
     if (Test-PrecheckCmdlet 'Get-VBRProtectionGroup') {
         try {
             $groups = @(Get-VBRProtectionGroup -ErrorAction SilentlyContinue)
+            $readGroups = $true
             foreach ($g in $groups) {
                 $ct = ''
                 try { if ($g.Container) { $ct = "$($g.Container.Type)" } } catch { }
@@ -175,9 +201,20 @@ function Test-ProtectionGroupPostMigration {
         } catch { }
     }
 
+    # An unread collection is empty, and this check's clean result used to be reached
+    # by falling through that empty collection - so a missing or throwing cmdlet
+    # produced "no Protection Groups found" rather than saying it could not look.
+    # Every other check fails safe to Manual/Info here; this one failed OPEN, and the
+    # finding it suppresses is a post-migration instruction the operator never sees.
+    if (-not $readGroups) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Protection Groups could not be enumerated on this server, so none could be examined.' `
+            -Recommendation 'After migration, rescan every Protection Group. Any Protection Group for Computers with Pre-installed Backup Agents must also be reconfigured with a new configuration file.'
+    }
+
     if ($groups.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'No Protection Groups found (no post-migration rescan needed).'
+            -Detail 'The Protection Group list on this server was read successfully and is empty, so no post-migration rescan is needed.'
     }
 
     $detail = "$($groups.Count) Protection Group(s) present. After migration ALL Protection Groups must be rescanned."

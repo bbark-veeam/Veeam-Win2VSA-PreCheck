@@ -96,6 +96,10 @@ Three artefacts are written to the output folder, plus a console summary:
 | `precheck-<timestamp>.json` | The same results, for collecting across servers |
 | `precheck-<timestamp>.log` | Run log |
 
+**See it before you run it:** [`examples/`](examples/) holds two sample reports — one from
+a server with nothing wrong with it, and one from a server that cannot migrate. Both are
+self-contained HTML with invented data; open either in a browser.
+
 ### How results are classified
 
 | Status | Meaning |

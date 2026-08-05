@@ -26,15 +26,39 @@ BeforeAll {
     $global:MockAppGroups   = @()
     $global:MockGcpAccounts = @()
     $global:MockGcpCompute  = @()
+    $global:MockCdp         = @()
+    $global:MockTenants     = @()
+    $global:MockNetApp      = @()
+    $global:MockPluginHosts = @()
+    $global:MockNimble      = @()
+    $global:MockCreds       = @()
+
+    # Cmdlets named here throw instead of returning data. That is how an unreadable
+    # collection actually presents in the field - a licence-dependent cmdlet (see
+    # DEP-001, where the Cloud Connect cmdlets throw without a provider licence) or a
+    # permissions failure - and it is distinct from the cmdlet being absent. Several
+    # checks used to fall through the resulting empty collection into a clean result.
+    $global:MockThrow = @()
+
+    function global:Assert-MockOk {
+        param([string] $Name)
+        if ($global:MockThrow -contains $Name) { throw "simulated failure reading $Name" }
+    }
 
     function global:Get-VBRDiscoveredComputer      { param($ErrorAction) $global:MockAgents }
-    function global:Get-VBRComputerBackupJob       { param($ErrorAction) $global:MockPolicies }
-    function global:Get-VBRProtectionGroup         { param($ErrorAction) $global:MockGroups }
+    function global:Get-VBRComputerBackupJob       { param($ErrorAction) Assert-MockOk 'Get-VBRComputerBackupJob'; $global:MockPolicies }
+    function global:Get-VBRProtectionGroup         { param($ErrorAction) Assert-MockOk 'Get-VBRProtectionGroup'; $global:MockGroups }
+    function global:Get-VBRCDPPolicy               { param($ErrorAction) Assert-MockOk 'Get-VBRCDPPolicy'; $global:MockCdp }
+    function global:Get-VBREntraIDTenant           { param($ErrorAction) Assert-MockOk 'Get-VBREntraIDTenant'; $global:MockTenants }
+    function global:Get-NetAppHost                 { param($ErrorAction) Assert-MockOk 'Get-NetAppHost'; $global:MockNetApp }
+    function global:Get-StoragePluginHost          { param($ErrorAction) Assert-MockOk 'Get-StoragePluginHost'; $global:MockPluginHosts }
+    function global:Get-NimbleHost                 { param($ErrorAction) Assert-MockOk 'Get-NimbleHost'; $global:MockNimble }
+    function global:Get-VBRCredentials             { param($ErrorAction) Assert-MockOk 'Get-VBRCredentials'; $global:MockCreds }
     function global:Get-VBRBackupRepository        { param($ErrorAction) $global:MockRepos }
     function global:Get-VBRUserRoleAssignment      { param($ErrorAction) $global:MockRoles }
     function global:Get-VBRJob                     { param($ErrorAction) $global:MockJobs }
     function global:Get-VBRJobObject               { param($Job, $ErrorAction) $global:MockJobObjects }
-    function global:Get-VBRApplicationGroup        { param($ErrorAction) $global:MockAppGroups }
+    function global:Get-VBRApplicationGroup        { param($ErrorAction) Assert-MockOk 'Get-VBRApplicationGroup'; $global:MockAppGroups }
     function global:Get-VBRGoogleCloudAccount      { param($ErrorAction) $global:MockGcpAccounts }
     function global:Get-VBRGoogleCloudComputeAccount { param($ErrorAction) $global:MockGcpCompute }
     function global:Get-VBREPPermission {
@@ -63,6 +87,9 @@ BeforeAll {
         $global:MockRepos = @(); $global:MockPerms = @{}; $global:MockRoles = @()
         $global:MockJobs = @(); $global:MockJobObjects = @(); $global:MockAppGroups = @()
         $global:MockGcpAccounts = @(); $global:MockGcpCompute = @()
+        $global:MockCdp = @(); $global:MockTenants = @(); $global:MockNetApp = @()
+        $global:MockPluginHosts = @(); $global:MockNimble = @(); $global:MockCreds = @()
+        $global:MockThrow = @()
     }
 }
 
@@ -330,5 +357,238 @@ Describe 'DEP-002 Google Cloud' {
 
     It 'states what it checked when reporting a Pass' {
         (Invoke-Check 'Test-GoogleCloudPlugin').Detail | Should -Match 'configuration source'
+    }
+}
+
+# --------------------------------------------------------------------------------
+# Counted clean results, and the checks that used to fall through an unread
+# collection into one. Every Pass below asserts on what the check SAYS it looked
+# at: a clean result that names no quantity reads identically whether the check
+# examined everything and found nothing wrong or examined nothing at all. Six of
+# these checks had never produced a non-empty result on real hardware, so the
+# populated cases here are the first time their filtering logic has ever run.
+# --------------------------------------------------------------------------------
+
+Describe 'AGT-001 empty agent inventory' {
+    BeforeEach { Reset-MockState }
+
+    It 'says the inventory was read when there are no agents' {
+        (Invoke-Check 'Test-AgentVersions').Detail | Should -Match 'read successfully and is empty'
+    }
+}
+
+Describe 'AGT-003 Mac agent jobs' {
+    BeforeEach { Reset-MockState }
+
+    # A bare substring match on 'Mac' also matches the word "machine", so ordinary
+    # Windows agent jobs were reported as Mac jobs. Same defect class as AGT-004
+    # matching the built-in "Manually Added" group.
+    It 'does not treat a Windows machine job as a Mac job' {
+        $global:MockPolicies = @(
+            [pscustomobject]@{ Name = 'Win agents'; OSPlatform = 'Windows'; Type = 'Workstation'; TypeToString = 'Windows Machine Backup' }
+        )
+        $r = Invoke-Check 'Test-MacAgentDomainAuth'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match '1 agent job\(s\) were examined'
+    }
+
+    It 'still flags a genuine Mac agent job' {
+        $global:MockPolicies = @(
+            [pscustomobject]@{ Name = 'Win agents'; OSPlatform = 'Windows'; Type = 'Server';     TypeToString = 'Windows machine' }
+            [pscustomobject]@{ Name = 'Mac laptops'; OSPlatform = 'macOS';  Type = 'Workstation'; TypeToString = 'Mac backup' }
+        )
+        $r = Invoke-Check 'Test-MacAgentDomainAuth'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'Mac laptops'
+        ($r.Evidence -join ';') | Should -Not -Match 'Win agents'
+        $r.Detail | Should -Match '1 of 2 agent job'
+    }
+
+    It 'states how many jobs it examined when reporting a Pass' {
+        $global:MockPolicies = @(
+            [pscustomobject]@{ Name = 'A'; OSPlatform = 'Windows'; Type = 'Server'; TypeToString = 'Windows' }
+            [pscustomobject]@{ Name = 'B'; OSPlatform = 'Linux';   Type = 'Server'; TypeToString = 'Linux' }
+        )
+        (Invoke-Check 'Test-MacAgentDomainAuth').Detail | Should -Match '2 agent job\(s\) were examined'
+    }
+
+    It 'reports Manual rather than Pass when the jobs cannot be read' {
+        $global:MockThrow = @('Get-VBRComputerBackupJob')
+        $r = Invoke-Check 'Test-MacAgentDomainAuth'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be enumerated'
+    }
+}
+
+Describe 'AGT-004 unreadable protection groups' {
+    BeforeEach { Reset-MockState }
+
+    # This check failed OPEN: an unread collection is empty, and the empty case
+    # returned Pass, so a throwing cmdlet produced "no Protection Groups found".
+    # Every other check in the tool degrades to Manual/Info instead.
+    It 'reports Manual rather than Pass when the groups cannot be read' {
+        $global:MockThrow = @('Get-VBRProtectionGroup')
+        $r = Invoke-Check 'Test-ProtectionGroupPostMigration'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be enumerated'
+    }
+
+    It 'says the list was read when there are genuinely no groups' {
+        $r = Invoke-Check 'Test-ProtectionGroupPostMigration'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'read successfully and is empty'
+    }
+}
+
+Describe 'JOB-001 CDP policies' {
+    BeforeEach { Reset-MockState }
+
+    It 'flags a configured CDP policy' {
+        $global:MockCdp = @([pscustomobject]@{ Name = 'CDP-Tier1' })
+        $r = Invoke-Check 'Test-CdpJobs'
+        $r.Status | Should -Be 'Warning'
+        ($r.Evidence -join ';') | Should -Match 'CDP-Tier1'
+    }
+
+    It 'says the list was read when reporting a Pass' {
+        (Invoke-Check 'Test-CdpJobs').Detail | Should -Match 'read successfully and is empty'
+    }
+}
+
+Describe 'DEP-003 Entra ID tenants' {
+    BeforeEach { Reset-MockState }
+
+    It 'flags a configured Entra ID tenant backup' {
+        $global:MockTenants = @([pscustomobject]@{ Name = 'contoso.onmicrosoft.com' })
+        $r = Invoke-Check 'Test-EntraIdBackups'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'contoso'
+    }
+
+    It 'says the inventory was read when reporting a Pass' {
+        (Invoke-Check 'Test-EntraIdBackups').Detail | Should -Match 'read successfully and is empty'
+    }
+}
+
+Describe 'STG-001 NetApp ONTAP' {
+    BeforeEach { Reset-MockState }
+
+    It 'flags an integrated ONTAP system' {
+        $global:MockNetApp = @([pscustomobject]@{ Name = 'ontap-01' })
+        $r = Invoke-Check 'Test-NetAppOntapRole'
+        $r.Status | Should -Be 'Warning'
+        ($r.Evidence -join ';') | Should -Match 'ontap-01'
+    }
+
+    It 'says the inventory was read when reporting a Pass' {
+        (Invoke-Check 'Test-NetAppOntapRole').Detail | Should -Match 'read successfully'
+    }
+}
+
+Describe 'STG-002 Universal Storage Plugin' {
+    BeforeEach { Reset-MockState }
+
+    It 'flags an integrated plug-in system and names the minimum versions' {
+        $global:MockPluginHosts = @([pscustomobject]@{ Name = 'flashsystem-01' })
+        $r = Invoke-Check 'Test-StoragePluginVersions'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'flashsystem-01'
+        $r.Recommendation | Should -Match '2\.3\.80'
+    }
+
+    It 'says the inventory was read when reporting a Pass' {
+        (Invoke-Check 'Test-StoragePluginVersions').Detail | Should -Match 'read successfully'
+    }
+}
+
+Describe 'STG-003 HPE Nimble / Alletra' {
+    BeforeEach { Reset-MockState }
+
+    It 'flags an integrated Nimble system' {
+        $global:MockNimble = @([pscustomobject]@{ Name = 'nimble-01' })
+        $r = Invoke-Check 'Test-NimbleFips'
+        $r.Status | Should -Be 'Warning'
+        ($r.Evidence -join ';') | Should -Match 'nimble-01'
+    }
+
+    It 'says the inventory was read when reporting a Pass' {
+        (Invoke-Check 'Test-NimbleFips').Detail | Should -Match 'read successfully'
+    }
+}
+
+Describe 'JOB-002 counted and unreadable application groups' {
+    BeforeEach { Reset-MockState }
+
+    # JOB-002 is the only check that can emit a Blocker, so a clean result it did
+    # not earn is the most expensive false Pass in the tool. Its cmdlet guard passes
+    # when EITHER SureBackup cmdlet exists, so the groups could still be unreadable.
+    It 'reports Manual rather than Pass when the groups cannot be read' {
+        $global:MockThrow = @('Get-VBRApplicationGroup')
+        $r = Invoke-Check 'Test-SureBackupSqlChecker'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be enumerated'
+    }
+
+    It 'states how many groups and VMs it examined when reporting a Pass' {
+        $global:MockAppGroups = @(
+            [pscustomobject]@{ Name = 'AG1'; VM = @(
+                [pscustomobject]@{ Name = 'Web01'; Role = @('WebServer') }
+                [pscustomobject]@{ Name = 'DC01';  Role = @('DomainController') }
+            ) }
+        )
+        $r = Invoke-Check 'Test-SureBackupSqlChecker'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match '1 SureBackup application group\(s\) containing 2 VM\(s\)'
+    }
+
+    It 'says the list was read when there are genuinely no groups' {
+        (Invoke-Check 'Test-SureBackupSqlChecker').Detail | Should -Match 'read successfully and is empty'
+    }
+}
+
+Describe 'SEC-002 counted credential review' {
+    BeforeEach { Reset-MockState }
+
+    # Note the real credential object exposes no usable Type, so the name-based
+    # 'root' exclusion is what does the work in the field; the typed record here
+    # covers the branch only.
+    It 'states how many credentials it examined when reporting a Pass' {
+        $global:MockCreds = @(
+            [pscustomobject]@{ Name = 'administrator@corp.local'; Description = 'domain admin' }
+            [pscustomobject]@{ Name = 'corp.local\svc-veeam';     Description = 'service account' }
+        )
+        $r = Invoke-Check 'Test-CredentialUpnFormat'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match '2 stored credential\(s\) were examined'
+        $r.Detail | Should -Match '2 are already in user@fqdn or fqdn\\user form'
+    }
+
+    It 'accounts for the records it set aside' {
+        $global:MockCreds = @(
+            [pscustomobject]@{ Name = 'administrator@corp.local'; Description = '' }
+            [pscustomobject]@{ Name = 'root';                     Description = 'ESXi host' }
+            [pscustomobject]@{ Name = 'keyuser'; Type = 'SSH';    Description = 'helper appliance' }
+        )
+        $r = Invoke-Check 'Test-CredentialUpnFormat'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match '2 were set aside'
+    }
+
+    It 'still reports a down-level credential for review' {
+        $global:MockCreds = @([pscustomobject]@{ Name = 'CORP\administrator'; Description = '' })
+        $r = Invoke-Check 'Test-CredentialUpnFormat'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'CORP\\administrator'
+    }
+
+    It 'reports Manual rather than Pass when the credentials cannot be read' {
+        $global:MockThrow = @('Get-VBRCredentials')
+        $r = Invoke-Check 'Test-CredentialUpnFormat'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be enumerated'
+    }
+
+    It 'distinguishes an empty credential store from a clean one' {
+        (Invoke-Check 'Test-CredentialUpnFormat').Detail | Should -Match 'read successfully and is empty'
     }
 }

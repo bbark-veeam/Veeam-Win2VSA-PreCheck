@@ -39,21 +39,26 @@ function Test-CredentialUpnFormat {
     }
 
     $candidates = @()
+    $examined = 0
+    $setAside = 0
+    $acceptable = 0
+    $readCreds = $false
     try {
         foreach ($c in Get-VBRCredentials -ErrorAction SilentlyContinue) {
             $u = [string]$c.Name
             if (-not $u) { continue }
+            $examined++
 
             # Standard type only. Excludes SSH, SSH private key, Kasten auth token,
             # Managed Service Account, and anything new that appears later.
             $type = if ($c.PSObject.Properties['Type']) { [string]$c.Type } else { '' }
-            if ($type -and $type -ne 'Standard') { continue }
+            if ($type -and $type -ne 'Standard') { $setAside++; continue }
 
             # Linux / appliance / ESXi root, incl. VBR's own auto-created records.
-            if ($u -ieq 'root') { continue }
+            if ($u -ieq 'root') { $setAside++; continue }
 
             # Already UPN-shaped (or an SSO/IdP suffix form) - not a candidate.
-            if ($u -match '@') { continue }
+            if ($u -match '@') { $acceptable++; continue }
 
             # FQDN\user is an accepted Kerberos form alongside user@fqdn - the Add
             # Windows Server wizard asks for "USER@FQDN or FQDN\USER". A prefix
@@ -61,17 +66,34 @@ function Test-CredentialUpnFormat {
             # is a NetBIOS domain or a machine name, and neither can authenticate
             # with Kerberos.
             $prefix = if ($u -match '\\') { $u.Split('\')[0] } else { '' }
-            if ($prefix -and $prefix.Contains('.')) { continue }
+            if ($prefix -and $prefix.Contains('.')) { $acceptable++; continue }
 
             $shape = if ($prefix) { 'NetBIOS or machine prefix' } else { 'bare user name' }
             $desc  = if ($c.PSObject.Properties['Description']) { [string]$c.Description } else { '' }
             $candidates += "$u  [$shape]$(if ($desc) { "  - $desc" })"
         }
+        $readCreds = $true
     } catch { }
 
     if ($candidates.Count -eq 0) {
-        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'All stored domain credentials are already in a Kerberos-compatible form (user@fqdn or fqdn\user), so nothing needs review for Kerberos-authenticated connections.'
+        if (-not $readCreds) {
+            return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+                -Detail 'The stored credentials on this server could not be enumerated, so their format was not checked.' `
+                -Recommendation 'Review manually: connections that authenticate with Kerberos - Windows servers added to the backup infrastructure, guest OS processing of Windows VMs, Windows agent management - need an Active Directory account in user@fqdn or fqdn\user form.'
+        }
+
+        # Says which credentials were judged and which were deliberately not. Most
+        # servers carry several records VBR created itself, so a bare "all clear"
+        # hides whether anything was actually in scope.
+        $detail = if ($examined -eq 0) {
+            'The stored credential list on this server was read successfully and is empty.'
+        }
+        else {
+            "$examined stored credential(s) were examined and none uses a NetBIOS domain prefix, a machine prefix, or a bare user name, so nothing needs review for Kerberos-authenticated connections." +
+            "$(if ($acceptable) { " $acceptable are already in user@fqdn or fqdn\user form." })" +
+            "$(if ($setAside)   { " $setAside were set aside as not applying to Kerberos paths (SSH, key, token or managed-service credentials, and 'root' accounts)." })"
+        }
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass -Detail $detail
     }
 
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `

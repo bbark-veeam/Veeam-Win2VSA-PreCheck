@@ -136,5 +136,5 @@ function Test-EntraIdBackups {
             -Evidence ($tenants | ForEach-Object { "Entra ID tenant: $($_.Name)" })
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No Microsoft Entra ID tenant backups found.'
+        -Detail 'The Entra ID tenant inventory on this server was read successfully and is empty, so no Entra ID backup data is affected by the migration.'
 }

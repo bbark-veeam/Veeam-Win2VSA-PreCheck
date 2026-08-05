@@ -43,27 +43,42 @@ Install-Module Pester -Scope CurrentUser -MinimumVersion 5.0   # once
 Invoke-Pester -Path ./tests -Output Detailed
 ```
 
-39 tests. They run against mocked Veeam cmdlets, so no VBR server is needed.
+64 tests. They run against mocked Veeam cmdlets, so no VBR server is needed. They also
+run in CI on every push, on both Windows and Linux.
 
-Each one corresponds to a real defect found by running the tool against a live server.
-Every one of those defects was a plausible-looking member name or match that returned
-nothing, so the check reported a confident clean result — none was a crash, and none
-would have been caught by reading the code. The tests exist so a future edit cannot
-quietly restore them:
+Each one corresponds to a real defect found in this tool. Almost every one was a
+plausible-looking member name or match that returned nothing, so the check reported a
+confident clean result — hardly any was a crash, and none would have been caught by
+reading the code. The tests exist so a future edit cannot quietly restore them:
 
 | Test group | The defect it pins down |
 |---|---|
 | AGT-001 | an unparseable version string fell through into a Pass |
 | AGT-002 | filtered on `IsEnabled`, which does not exist; `ScheduleEnabled` is a different property |
+| AGT-003 | matched `Mac` as a substring, so the word "ma**c**hine" made Windows jobs look like Mac jobs |
 | AGT-004 | read the group's `Type` instead of `Container.Type`; `ManuallyAdded` vs `ManuallyDeployed` |
+| SEC-002 | passed on a credential list it had failed to read; the clean result now counts what it judged |
 | SEC-004 | read `.Accounts`, which does not exist on `VBREPPermission`; local vs domain prefixes |
-| JOB-002 | a regex over the serialised object returned False with the script enabled |
+| JOB-001 | populated path had never run — no CDP policy has ever existed in the lab |
+| JOB-002 | a regex over the serialised object returned False with the script enabled; and it could report clean without enumerating anything |
 | JOB-003 | read only the job-level guest options, missing per-machine overrides and `JobScriptCommand` |
 | DEP-002 | detection must key on Google Cloud *configuration*, not the plug-in being installed |
+| DEP-003, STG-001/002/003 | populated paths had never run — the lab has no Entra ID tenant, NetApp, storage plug-in or Nimble |
 | `Get-PrecheckScriptPath` | a pre/post-job command line can carry a password; only the executable is reported |
 
+Two patterns are worth knowing before you change a check:
+
+- **Never let an unread collection become a clean result.** An empty collection and an
+  unreadable one look identical, and four checks used to fall through the second into a
+  Pass. Track whether the read succeeded and degrade to `Manual`/`Info` if it did not.
+  `$global:MockThrow` in the tests simulates this — it is how a licence-dependent or
+  permission-denied cmdlet actually behaves, and it is distinct from a missing cmdlet.
+- **Every clean result states what it examined.** A Pass naming no quantity reads the
+  same whether the check inspected everything or nothing, which is how the SEC-004
+  defect survived for weeks. Assert on that text in the test.
+
 A test suite that passes proves nothing on its own. When adding one, reintroduce the
-defect and confirm the test fails — that is how these were validated.
+defect and confirm the test fails — that is how all 25 of these were validated.
 
 ## Adding a check
 

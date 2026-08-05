@@ -14,31 +14,88 @@ produces.
 
 ## [Unreleased]
 ### Added
-- **Pester test suite — 39 tests, run against mocked Veeam cmdlets so no VBR server is
-  needed.** `src/tests/Helpers.Tests.ps1` (13) and `src/tests/Regressions.Tests.ps1` (26).
-  Run them with `Invoke-Pester -Path ./tests` from `src/`.
-- Each test corresponds to a defect found by running the tool against a live server. Every
-  one of those defects was a plausible-looking member name or match that returned nothing, so
-  the check reported a confident clean result — none was a crash, and none would have been
-  caught by reading the code. The tests exist so that a future edit cannot quietly restore
-  them.
-- **The suite was mutation-validated: all ten defects were reintroduced one at a time, and
-  the suite failed on every one.** A suite that passes proves nothing on its own, so this is
-  the bar for adding a test — reintroduce the defect and confirm the test fails.
-- The developer README documents how to run the tests and maps each test group to the defect
-  it pins down.
-- A further set of build-invariant tests is kept in the development tree rather than here:
-  they assert on the build outputs and version files of that tree, which have no counterpart
-  in this repository.
-- **Continuous integration.** The suite runs on every push and pull request, on both Windows
-  and Linux runners. Windows is the platform the tool runs on; Linux proves the suite does
-  not depend on ambient machine identity, since SEC-004 reads the computer name, the user
-  domain and CIM, all of which are absent or different off Windows. The workflow fails if no
-  tests are discovered — a green run that executed nothing is the same class of defect as a
-  check reporting a clean result while measuring nothing.
-
 ### Changed
 ### Fixed
+
+## [0.4.2] - 2026-08-05
+### Fixed
+- **Four checks failed OPEN, returning a clean result when they could not read anything.**
+  An unread collection is empty, and each of these reached its clean result by falling
+  through that empty collection — so a cmdlet that was missing or that threw produced
+  "none found" rather than saying it could not look. Every other check in the tool
+  degrades to `Manual`/`Info` in that situation. Now they all do:
+  - **AGT-004** returned `Pass` "No Protection Groups found" whenever protection groups
+    were unreadable. The finding it suppressed is a post-migration instruction — rescan
+    every protection group, and reconfigure any pre-installed-agent group with a new
+    configuration file — so a false clean result here means the operator never learns to
+    do it, and agent backups break after migration.
+  - **JOB-002** could report a clean result without ever enumerating application groups:
+    its cmdlet guard passes when *either* SureBackup cmdlet exists. This is the only
+    check in the tool that can emit a `Blocker`, so it is the most expensive place in the
+    tool to report something clean that was never examined.
+  - **AGT-003** and **SEC-002** likewise passed on a collection they had failed to read.
+- **AGT-003 reported ordinary Windows agent jobs as Veeam Agent for Mac jobs.** It matched
+  `Mac` as a bare substring across the job's platform and type strings, and the word
+  **"machine"** contains it. Now matched as whole words only. This is the same mistake that
+  had AGT-004 flagging the built-in "Manually Added" protection group, and the rule the
+  project wrote down after that one — compare exactly, never substring-match — is what it
+  violated. The exact platform vocabulary is still unconfirmed, so this remains a word
+  match rather than an enum comparison.
+
+### Changed
+- **Every clean result now states what it examined.** Ten remained that said only
+  "No X found": AGT-001, AGT-003, AGT-004, DEP-003, JOB-001, JOB-002, SEC-002 and
+  STG-001/002/003. A clean result naming no quantity reads identically whether the check
+  inspected everything and found nothing wrong or inspected nothing at all — which is
+  precisely how the SEC-004 defect survived for weeks. Where a meaningful denominator
+  exists it is now given: AGT-003 states how many agent jobs it examined, JOB-002 how many
+  application groups and VMs, and SEC-002 how many credentials it judged, how many were
+  already in an accepted form, and how many it set aside as not applying to Kerberos paths.
+  Where the collection is genuinely empty, the result says the list was read successfully
+  and is empty — which a broken probe cannot claim.
+
+### Added
+- **Pester test suite — 64 tests, run against mocked Veeam cmdlets so no VBR server is
+  needed.** `src/tests/Helpers.Tests.ps1` (13) and `src/tests/Regressions.Tests.ps1` (51).
+  Run them with `Invoke-Pester -Path ./tests` from `src/`. A further set of build-invariant
+  tests is kept in the development tree: they assert on that tree's build outputs and version
+  files, which have no counterpart in this repository.
+- Each check-level test corresponds to a defect found by running the tool against a live
+  server. Every one of those defects was a plausible-looking member name or match that
+  returned nothing, so the check reported a confident clean result — none was a crash, and
+  none would have been caught by reading the code. The tests exist so that a future edit
+  cannot quietly restore them.
+- **The suite is mutation-validated: 25 defects were reintroduced one at a time — the ten
+  historical ones and the fifteen fixed or counted here — and the suite failed on every
+  one.** A suite that passes proves nothing on its own, so this is the bar for adding a test:
+  reintroduce the defect and confirm the test fails.
+- **Six checks now have their populated path exercised for the first time.** STG-001,
+  STG-002, STG-003, JOB-001, DEP-003 and AGT-003 had never returned a non-empty result on
+  real hardware, because the lab has no NetApp, no storage plug-in, no Nimble, no CDP, no
+  Entra ID tenant and no Mac. Their filtering logic had therefore never run at all. Mocked
+  shapes now cover it, which is how the AGT-003 substring defect was found.
+- The developer README documents how to run the tests and maps each test group to the defect
+  it pins down.
+- **Two example HTML reports** in `examples/`, linked from the README, so the output
+  can be seen before the tool is run: one from a server with nothing wrong with it
+  (`REVIEW WARNINGS`, exit 0) and one from a server that cannot migrate (`MIGRATION BLOCKED`,
+  exit 2). Generated from the development tree by driving the **real** orchestrator and checks
+  against mocked cmdlets, so an example cannot drift from what the
+  tool actually emits. The data is invented and generic. A test in the development tree asserts both
+  exist, carry the current version, name no lab identifier, and are self-contained.
+- **The clean example documents a structural property worth knowing: `READY` is
+  unreachable.** SEC-001 (four-eyes) and SEC-003 (trusted-domain auth) return `Manual`
+  unconditionally because neither state is exposed to PowerShell, and any `Manual` demotes
+  the verdict — so the best result any real server can get is `REVIEW WARNINGS` with those
+  two outstanding. The examples README says so explicitly rather than leaving operators to
+  wonder what a passing server looks like.
+- **Continuous integration** (`.github/workflows/tests.yml`): the suite runs on every push
+  and pull request, on both Windows and Linux runners.
+  Windows is the platform the tool runs on; Linux proves the suite does not depend on ambient
+  machine identity, since SEC-004 reads `COMPUTERNAME`, `USERDOMAIN` and CIM, all of which are
+  absent or different off Windows. The workflow fails if no tests are discovered — a green run
+  that executed nothing is the same class of defect as a check reporting a clean result while
+  measuring nothing.
 
 ## [0.4.1] - 2026-08-05
 ### Added

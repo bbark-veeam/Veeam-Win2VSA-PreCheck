@@ -1,6 +1,6 @@
 @{
     RootModule        = 'VbrMigrationPrecheck.psm1'
-    ModuleVersion     = '0.4.1'
+    ModuleVersion     = '0.4.2'
     GUID              = 'b7e2c1a4-8f3d-4a6e-9c21-5d0f7a2b9e10'
     Author            = 'Brad Barker'
     CompanyName       = 'Veeam'
