@@ -36,6 +36,35 @@ functions and check IDs, and fails loudly rather than emitting something subtly 
 **Do not edit the generated script.** Changes there are lost on the next build, and its
 header says so.
 
+## Tests
+
+```powershell
+Install-Module Pester -Scope CurrentUser -MinimumVersion 5.0   # once
+Invoke-Pester -Path ./tests -Output Detailed
+```
+
+39 tests. They run against mocked Veeam cmdlets, so no VBR server is needed.
+
+Each one corresponds to a real defect found by running the tool against a live server.
+Every one of those defects was a plausible-looking member name or match that returned
+nothing, so the check reported a confident clean result — none was a crash, and none
+would have been caught by reading the code. The tests exist so a future edit cannot
+quietly restore them:
+
+| Test group | The defect it pins down |
+|---|---|
+| AGT-001 | an unparseable version string fell through into a Pass |
+| AGT-002 | filtered on `IsEnabled`, which does not exist; `ScheduleEnabled` is a different property |
+| AGT-004 | read the group's `Type` instead of `Container.Type`; `ManuallyAdded` vs `ManuallyDeployed` |
+| SEC-004 | read `.Accounts`, which does not exist on `VBREPPermission`; local vs domain prefixes |
+| JOB-002 | a regex over the serialised object returned False with the script enabled |
+| JOB-003 | read only the job-level guest options, missing per-machine overrides and `JobScriptCommand` |
+| DEP-002 | detection must key on Google Cloud *configuration*, not the plug-in being installed |
+| `Get-PrecheckScriptPath` | a pre/post-job command line can carry a password; only the executable is reported |
+
+A test suite that passes proves nothing on its own. When adding one, reintroduce the
+defect and confirm the test fails — that is how these were validated.
+
 ## Adding a check
 
 Drop a `Test-*.ps1` function into `Checks/` and register it in `$script:PrecheckRegistry`

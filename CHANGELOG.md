@@ -14,6 +14,23 @@ produces.
 
 ## [Unreleased]
 ### Added
+- **Pester test suite — 39 tests, run against mocked Veeam cmdlets so no VBR server is
+  needed.** `src/tests/Helpers.Tests.ps1` (13) and `src/tests/Regressions.Tests.ps1` (26).
+  Run them with `Invoke-Pester -Path ./tests` from `src/`.
+- Each test corresponds to a defect found by running the tool against a live server. Every
+  one of those defects was a plausible-looking member name or match that returned nothing, so
+  the check reported a confident clean result — none was a crash, and none would have been
+  caught by reading the code. The tests exist so that a future edit cannot quietly restore
+  them.
+- **The suite was mutation-validated: all ten defects were reintroduced one at a time, and
+  the suite failed on every one.** A suite that passes proves nothing on its own, so this is
+  the bar for adding a test — reintroduce the defect and confirm the test fails.
+- The developer README documents how to run the tests and maps each test group to the defect
+  it pins down.
+- A further set of build-invariant tests is kept in the development tree rather than here:
+  they assert on the build outputs and version files of that tree, which have no counterpart
+  in this repository.
+
 ### Changed
 ### Fixed
 
