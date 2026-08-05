@@ -37,8 +37,8 @@
   <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
   <div class="meta">Server: BACKUP02.corp.local &nbsp;|&nbsp;
     Build: Veeam Backup &amp; Replication 13.1.0.411 &nbsp;|&nbsp;
-    Generated: 2026-08-05 15:43:28 -04:00 &nbsp;|&nbsp;
-    Precheck version: 0.4.3 &nbsp;|&nbsp;
+    Generated: 2026-08-05 16:12:14 -04:00 &nbsp;|&nbsp;
+    Precheck version: 0.4.4 &nbsp;|&nbsp;
     Reference: KB4800 (captured 2026-07-24)</div>
 </header>
 <div class="wrap">
@@ -130,7 +130,7 @@
   <td class="mono">SEC-005</td>
   <td>
     <div class="title">Console role assignment format</div>
-    <div class="detail">2 console role assignment(s) are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created.</div>
+    <div class="detail">2 of 2 console role assignment(s) read on this server are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created.</div>
     <div class='rec'>&#8594; Before migrating, re-create each assignment below in the appliance form: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: &quot;Specify a username in the UPN format (username@domain.com).&quot;</div>
     <ul class='ev'><li>Administrators  [Group, role: BackupAdmin]  -&gt; unqualified name - the appliance needs group@domain</li><li>CORP\Administrator  [User, role: BackupAdmin]  -&gt; prefixed form - the appliance needs user@fqdn</li></ul>
   </td>
@@ -174,8 +174,8 @@
   <td class="mono">DB-001</td>
   <td>
     <div class="title">Session-history retention</div>
-    <div class="detail">Session history is kept for 13 week(s). Sessions predating the environment upgrade cause migration to fail, and this check cannot tell whether 13 week(s) reaches back past that upgrade without knowing its date.</div>
-    <div class='rec'>&#8594; Compare 13 week(s) against the date this environment was upgraded. If the window reaches back before the upgrade, reduce it so those sessions age out. Re-run with -UpgradeDate &lt;date&gt; to have this decided automatically.</div>
+    <div class="detail">Session history is kept for 13 week(s). Sessions predating the upgrade to v12 cause migration to fail - the problem is session data from v11 and earlier - and this check cannot tell whether 13 week(s) reaches back past that upgrade without knowing its date.</div>
+    <div class='rec'>&#8594; Compare 13 week(s) against the date this environment was upgraded to v12. If the window reaches back before that, reduce it so the older sessions age out. Re-run with -UpgradeDate &lt;date of the v12 upgrade&gt; to have this decided automatically.</div>
     <ul class='ev'><li>KeepAllSessions=False</li><li>RetentionLimitWeeks=13</li></ul>
   </td>
   <td class="cat">Job history</td>

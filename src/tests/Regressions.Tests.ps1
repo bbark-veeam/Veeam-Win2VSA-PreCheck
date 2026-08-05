@@ -770,7 +770,7 @@ Describe 'DB-001 session-history retention' {
     It 'flags retention that reaches back past the upgrade, and names a target' {
         $r = Invoke-DbCheck -UpgradeDate (Get-Date).AddDays(-49)   # 7 weeks
         $r.Status | Should -Be 'Action'
-        $r.Detail | Should -Match 'reaches back to or past the upgrade'
+        $r.Detail | Should -Match 'reaches back to or past the v12 upgrade'
         $r.Recommendation | Should -Match 'RetentionLimitWeeks 6'
     }
 
@@ -780,8 +780,23 @@ Describe 'DB-001 session-history retention' {
     It 'refuses an implausible cutoff instead of passing on it' {
         $r = Invoke-DbCheck -UpgradeDate ([datetime] 0)
         $r.Status | Should -Be 'Manual'
-        $r.Detail | Should -Match 'predates Veeam Backup & Replication'
+        $r.Detail | Should -Match 'predates Veeam Backup & Replication v12'
         $r.Status | Should -Not -Be 'Pass'
+    }
+
+    # The date being asked for is the upgrade to v12, because what breaks migration is
+    # session data written by v11 and earlier. A date before v12 existed cannot be it -
+    # most likely the v11 upgrade date, or a mistyped year - and that is a far more
+    # realistic mistake than DateTime.MinValue.
+    It 'refuses a cutoff predating v12, not merely an absurd one' {
+        $r = Invoke-DbCheck -UpgradeDate ([datetime] '2019-06-01')
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'upgraded to v12'
+        $r.Status | Should -Not -Be 'Pass'
+    }
+
+    It 'names the v12 boundary when it defers for want of a date' {
+        (Invoke-DbCheck -UpgradeDate $null).Detail | Should -Match 'v11 and earlier'
     }
 
     It 'refuses a cutoff in the future' {
@@ -826,5 +841,123 @@ Describe 'DB-001 session-history retention' {
     It 'never reads the session list' {
         { Invoke-DbCheck -UpgradeDate (Get-Date).AddYears(-2) } | Should -Not -Throw
         { Invoke-DbCheck -UpgradeDate $null } | Should -Not -Throw
+    }
+}
+
+Describe 'SEC-005 console role assignment format' {
+    BeforeEach { Reset-MockState }
+
+    # Shapes taken from real Users & Roles dialogs. Note the console shows the builtin
+    # group as BUILTIN\Administrators while PowerShell has been seen returning it bare,
+    # so both are covered.
+
+    It 'passes when every assignment already uses an @ form, and counts them' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'backupadmin@corp.local';   Role = 'BackupAdmin'; Type = 'User' }
+            [pscustomobject]@{ Name = 'Domain Admins@corp.local'; Role = 'BackupAdmin'; Type = 'Group' }
+        )
+        $r = Invoke-Check 'Test-RoleAssignmentUpnFormat'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'All 2 console role assignment'
+    }
+
+    # THE 0.3.7 DEFECT: Type (User/Group) was read and never used, so every finding named
+    # user@fqdn - including for a group, which sends the operator to do something that
+    # fails. A group needs group@domain.
+    It 'tells a group to use group@domain, not user@fqdn' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'CORP\DOMAIN ADMINS'; Role = 'BackupAdmin'; Type = 'Group' }
+        )
+        $r = Invoke-Check 'Test-RoleAssignmentUpnFormat'
+        $r.Status | Should -Be 'Action'
+        ($r.Evidence -join ';') | Should -Match 'group@domain'
+        ($r.Evidence -join ';') | Should -Not -Match 'user@fqdn'
+        # A space in the group name must survive into the finding.
+        ($r.Evidence -join ';') | Should -Match 'DOMAIN ADMINS'
+    }
+
+    It 'tells a user to use user@fqdn' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'CORP\Administrator'; Role = 'BackupAdmin'; Type = 'User' }
+        )
+        $r = Invoke-Check 'Test-RoleAssignmentUpnFormat'
+        $r.Status | Should -Be 'Action'
+        ($r.Evidence -join ';') | Should -Match 'user@fqdn'
+        ($r.Evidence -join ';') | Should -Not -Match 'group@domain'
+    }
+
+    # A builtin or machine-local principal cannot simply be re-typed with an @ - it has
+    # no counterpart on a Linux appliance at all, so the advice has to differ.
+    It 'says a builtin principal has no counterpart rather than telling them to convert it' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'BUILTIN\Administrators'; Role = 'BackupAdmin'; Type = 'Group' }
+        )
+        ($r = Invoke-Check 'Test-RoleAssignmentUpnFormat').Status | Should -Be 'Action'
+        ($r.Evidence -join ';') | Should -Match 'no counterpart'
+    }
+
+    It 'treats a machine-local prefix as local, not as a domain' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'BACKUP01\svcveeam'; Role = 'BackupAdmin'; Type = 'User' }
+        )
+        ($r = Invoke-Check 'Test-RoleAssignmentUpnFormat').Evidence -join ';' | Should -Match 'no counterpart'
+    }
+
+    It 'reports an unqualified name as such' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'Administrators'; Role = 'BackupAdmin'; Type = 'Group' }
+        )
+        ($r = Invoke-Check 'Test-RoleAssignmentUpnFormat').Evidence -join ';' | Should -Match 'unqualified name'
+    }
+
+    It 'says so when the principal type is not reported' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'CORP\someone'; Role = 'BackupAdmin' }
+        )
+        ($r = Invoke-Check 'Test-RoleAssignmentUpnFormat').Evidence -join ';' | Should -Match 'type not reported'
+    }
+
+    # These are the exact strings Get-VBRUserRoleAssignment returned on the lab's Windows
+    # VBR - builtin group, down-level user, down-level group. Note the cmdlet UPPERCASES
+    # the name (the console shows it mixed-case) and the space survives. All
+    # three are findings, each with its own reason, and this combination is validated live.
+    It 'reports all three shapes on a typical Windows source with distinct reasons' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'BUILTIN\Administrators';   Role = 'BackupAdmin'; Type = 'Group' }
+            [pscustomobject]@{ Name = 'CORP\Administrator';  Role = 'BackupAdmin'; Type = 'User' }
+            [pscustomobject]@{ Name = 'CORP\DOMAIN ADMINS';  Role = 'BackupAdmin'; Type = 'Group' }
+        )
+        $r = Invoke-Check 'Test-RoleAssignmentUpnFormat'
+        $r.Status | Should -Be 'Action'
+        $r.Detail | Should -Match '3 console role assignment'
+        $ev = $r.Evidence -join ';'
+        $ev | Should -Match 'no counterpart'
+        $ev | Should -Match 'the appliance needs user@fqdn'
+        $ev | Should -Match 'the appliance needs group@domain'
+    }
+
+    # The finding count needs its denominator. Without it, "2 assignments are not in the
+    # required form" reads the same whether two were examined and both were wrong or
+    # three were examined and one was fine - and that ambiguity made a real discrepancy
+    # against the console impossible to diagnose from the report.
+    It 'states how many assignments it read, not just how many are wrong' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'BUILTIN\Administrators';  Role = 'BackupAdmin'; Type = 'Group' }
+            [pscustomobject]@{ Name = 'good@corp.local';          Role = 'BackupAdmin'; Type = 'User' }
+            [pscustomobject]@{ Name = 'Fine Group@corp.local';    Role = 'BackupAdmin'; Type = 'Group' }
+        )
+        (Invoke-Check 'Test-RoleAssignmentUpnFormat').Detail | Should -Match '1 of 3 console role assignment'
+    }
+
+    # A count of zero is not a clean result. "All 0 assignments already use the required
+    # form" was a confident statement derived from nothing - the same fail-open as
+    # AGT-004, hidden here because the Pass already carried a number and zero looked like
+    # a count. A backup server always has at least one assignment.
+    It 'defers rather than passing when no assignments come back' {
+        $global:MockRoles = @()
+        $r = Invoke-Check 'Test-RoleAssignmentUpnFormat'
+        $r.Status | Should -Be 'Manual'
+        $r.Status | Should -Not -Be 'Pass'
+        $r.Detail | Should -Match 'always has at least one assignment'
     }
 }

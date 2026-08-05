@@ -131,24 +131,22 @@ function Test-RoleAssignmentUpnFormat {
     # Veeam's input syntax for naming a group, not a real UPN - but the shape the
     # appliance wants is the same '@' form either way, so both are flagged the same;
     # only the remediation wording differs.
-    # The target form differs by principal type, and naming the wrong one sends the
-    # operator to do something that fails:
-    #   domain USER  -> user@fqdn
-    #   domain GROUP -> group@domain, e.g. Administrators@tech.local
-    # (Veeam UG, Configuring Users and Roles: "To add a default domain security group,
-    # use the group@domain format".) A group has no userPrincipalName in AD - this is
-    # Veeam's input syntax for naming a group, not a real UPN - but the shape the
-    # appliance wants is the same '@' form either way, so both are flagged the same;
-    # only the remediation wording differs.
     #
-    # OPEN QUESTION: whether a down-level DOMAIN\principal is in fact acceptable as a
-    # stored ASSIGNMENT. The evidence for requiring '@' is the appliance SIGN-IN form
-    # rejecting a non-UPN username, which constrains what a person types at login - not
-    # necessarily the stored string, since VBR may match the two by SID. Until that is
-    # confirmed this check reports the prefixed forms; do not narrow it on reasoning
-    # alone.
+    # The group form is CONFIRMED on working appliances, not just documented: one holds
+    # several domain security groups in group@domain form, and on another a user whose only
+    # grant was membership of such a group signed in successfully. So group-based access
+    # does have an appliance equivalent.
+    #
+    # STILL OPEN: whether a down-level DOMAIN\principal is acceptable as a stored
+    # ASSIGNMENT. The evidence for requiring '@' is the appliance SIGN-IN form rejecting a
+    # non-UPN username, which constrains what a person types at login - not necessarily
+    # the stored string, since VBR may match the two by SID. If a stored DOMAIN\principal
+    # turns out to work, this check over-flags and should narrow to builtin/local only.
+    # Until that is tested on an appliance, it reports the prefixed forms; do not narrow
+    # it on reasoning alone.
     $bad = @()
     $ok  = 0
+    $readAssignments = $false
     try {
         foreach ($ra in Get-VBRUserRoleAssignment -ErrorAction SilentlyContinue) {
             $nm = [string]$ra.Name
@@ -171,15 +169,32 @@ function Test-RoleAssignmentUpnFormat {
                 }
             $bad += "$nm  [$(if ($type) { $type } else { 'type not reported' }), role: $role]  -> $why"
         }
+        $readAssignments = $true
     } catch { }
+
+    # A count of zero is not a clean result here. An unread collection is empty, and
+    # "All 0 assignments already use the required form" is a confident clean statement
+    # derived from nothing - the same fail-open that AGT-004 and JOB-002 had, hidden in
+    # this one because the Pass already carried a number and a zero looked like a count.
+    # Zero is also impossible on a real server: a backup server always has at least one
+    # role assignment, so seeing none means the read did not work.
+    if ($bad.Count -eq 0 -and (-not $readAssignments -or $ok -eq 0)) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'No console role assignments could be read on this server, so their format was not checked. A backup server always has at least one assignment, so none being returned means they could not be enumerated.' `
+            -Recommendation 'Check Users & Roles by hand. Console login on the Veeam Software Appliance needs an @ form: a domain user as user@fqdn, a domain security group as group@domain. Local and builtin principals have no counterpart on the appliance.'
+    }
 
     if ($bad.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
             -Detail "All $ok console role assignment(s) already use the domain form the appliance requires (user@fqdn for a user, group@domain for a group)."
     }
 
+    # State the denominator, not just the count of findings. Without it, "2 assignments
+    # are not in the required form" reads the same whether it examined two and both were
+    # wrong or examined three and one was fine - and that ambiguity made a real
+    # discrepancy against the console undiagnosable from the report alone.
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Action `
-        -Detail "$($bad.Count) console role assignment(s) are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created." `
+        -Detail "$($bad.Count) of $($bad.Count + $ok) console role assignment(s) read on this server are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created." `
         -Recommendation 'Before migrating, re-create each assignment below in the appliance form: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: "Specify a username in the UPN format (username@domain.com)."' `
         -Evidence ($bad | Sort-Object -Unique)
 }

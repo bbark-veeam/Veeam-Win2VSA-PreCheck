@@ -17,6 +17,57 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.4.4] - 2026-08-05
+### Fixed
+- **DB-001 now says plainly that the date wanted is the upgrade to v12**, and why: what
+  breaks migration is session data written by **v11 and earlier**. Every customer-facing
+  string names that boundary instead of "the environment upgrade", which was ambiguous
+  about which upgrade. A later date such as the v13 upgrade still errs safe but over-flags,
+  because it also counts legitimate v12-era sessions and can prescribe a retention
+  reduction that is not needed — so the `V13UpgradeDate` alias is kept for anyone who only
+  knows that date, not offered as the right input.
+- **The plausibility floor is now v12's own existence rather than 2008.** A date before v12
+  shipped cannot be the date this environment moved to v12 — it is most likely the v11
+  upgrade date or a mistyped year, which is a far more realistic mistake than the
+  `DateTime.MinValue` case that prompted the guard.
+- **SEC-005 could report a clean result it had not earned — a fifth check failing open.**
+  Its clean result already carried a number ("All N assignments already use the required
+  form"), so it was missed when the other four were fixed: a **zero** looked like a count.
+  If the assignments could not be read the loop simply produced none, and the check said
+  "All 0 console role assignment(s) already use the domain form the appliance requires."
+  Zero is also impossible on a real server — a backup server always has at least one role
+  assignment — so none coming back means the read did not work, and it now says so.
+  **The general lesson: a counted clean result with a zero denominator is still an
+  uncounted one.** The earlier sweep looked for missing numbers, not for numbers that can
+  be zero.
+
+### Changed
+- **SEC-005 findings now state the denominator**: "1 of 3 console role assignment(s) read
+  on this server are not in the form…". Previously the count of findings was given without
+  the number examined, so "2 assignments are not in the required form" read identically
+  whether two were examined and both were wrong or three were examined and one was fine.
+  That ambiguity made a real discrepancy against the console impossible to diagnose from
+  the report, which is what prompted the change. The same counted-result principle had
+  been applied to clean results but not to findings.
+
+### Added
+- **A repository-wide lab-identifier scan.** The shipped artefact was already checked, but
+  nothing checked everything published *alongside* it — and a lab domain reached both a
+  source comment (caught, because it flows into the artefact) and the public changelog and
+  test data (not caught). The build tests now scan every published `.ps1`, `.md`, `.html`,
+  `.yml` and `.json`. The repository is public; the guard should cover all of it.
+- **Tests for SEC-005** (96 shipped tests total), each mutation-validated — 6 mutations, all
+  caught. They cover the group-versus-user remediation forms, builtin and machine-local
+  principals having no appliance counterpart, an unqualified name, an unreported principal
+  type, the denominator, and the zero-count guard.
+- The multi-shape test uses the **exact strings `Get-VBRUserRoleAssignment` returned on a
+  real Windows VBR**, which uppercases the whole name where the console displays it
+  mixed-case, and preserves the space in a group name.
+- **SEC-005's group remediation path is now validated live.** A down-level domain group on
+  the source is correctly told to become `group@domain`, alongside a down-level user told
+  to become `user@fqdn` and a builtin group told it has no counterpart at all — three
+  findings, three distinct reasons, confirmed on a real server.
+
 ## [0.4.3] - 2026-08-05
 ### Fixed
 - **DB-001 accepted an implausible upgrade date and turned it into a confident `Pass`.**

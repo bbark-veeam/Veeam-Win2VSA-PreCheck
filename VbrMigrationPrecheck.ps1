@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.4.3
-#  Built   : 2026-08-05 15:43:15
+#  Version : 0.4.4
+#  Built   : 2026-08-05 16:12:13
 #  Sources : 15 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.4.3'
+$script:PrecheckVersion = '0.4.4'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -563,8 +563,9 @@ function Test-ProtectionGroupPostMigration {
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Checks/Test-Database.ps1
 # -----------------------------------------------------------------------------
-# Database checks. KB4800: job-history sessions predating the environment upgrade
-# cause migration to fail; the remedy is to reduce session-history retention.
+# Database checks. KB4800: job-history sessions predating the upgrade to v12 cause
+# migration to fail - the limiting factor is session data written by v11 and earlier.
+# The remedy is to reduce session-history retention so those sessions age out.
 #
 # Reads the retention SETTING (Get-VBRHistoryOptions: KeepAllSessions,
 # RetentionLimitWeeks) rather than enumerating sessions - Get-VBRBackupSession has
@@ -574,8 +575,11 @@ function Test-SessionHistoryAge {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] $Ctx,
-        # v12 upgrade date is the strict KB boundary; the v13 date is a broader,
-        # safe-erring cutoff. Same remedy either way.
+        # THE DATE IS WHEN THIS ENVIRONMENT WAS UPGRADED TO v12. That is the boundary
+        # that matters, because what breaks migration is session data written by v11 and
+        # earlier. Supplying a later date (e.g. the v13 upgrade) errs safe but over-flags:
+        # it also counts legitimate v12-era sessions, so it can prescribe a retention
+        # reduction that is not actually needed.
         [Alias('V12UpgradeDate', 'V13UpgradeDate')]
         [Nullable[datetime]] $UpgradeDate
     )
@@ -586,7 +590,7 @@ function Test-SessionHistoryAge {
     if (-not (Test-PrecheckCmdlet 'Get-VBRHistoryOptions')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
             -Detail 'Session-history retention could not be read on this server.' `
-            -Recommendation 'Job-history sessions predating the environment upgrade cause migration to fail. Check Options > History and reduce session-history retention so those sessions age out before migrating.'
+            -Recommendation 'Job-history sessions predating the upgrade to v12 cause migration to fail - the problem is session data from v11 and earlier. Check Options > History and reduce session-history retention so those sessions age out before migrating.'
     }
 
     $opts = $null
@@ -604,7 +608,7 @@ function Test-SessionHistoryAge {
     # Keeping everything means nothing ever ages out.
     if ($keepAll) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Action `
-            -Detail 'Session history is set to keep ALL sessions, so job sessions predating the environment upgrade are still in the database. KB4800 lists those sessions as a cause of migration failure.' `
+            -Detail 'Session history is set to keep ALL sessions, so job sessions predating the upgrade to v12 are still in the database. KB4800 lists those sessions - written by v11 and earlier - as a cause of migration failure.' `
             -Recommendation 'Set a session-history retention limit (Options > History, or Set-VBRHistoryOptions -RetentionLimitWeeks <n>) short enough that pre-upgrade sessions age out, allow them to be pruned, then re-run this check before migrating.' `
             -Evidence $ev
     }
@@ -612,7 +616,7 @@ function Test-SessionHistoryAge {
     if ($null -eq $weeks) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
             -Detail 'Session history is not set to keep all sessions, but no retention period could be read.' `
-            -Recommendation 'Confirm the session-history retention period in Options > History and ensure it is shorter than the time since the environment was upgraded.' `
+            -Recommendation 'Confirm the session-history retention period in Options > History and ensure it is shorter than the time since this environment was upgraded to v12.' `
             -Evidence $ev
     }
 
@@ -620,8 +624,8 @@ function Test-SessionHistoryAge {
     # to their own upgrade date. Still actionable, and still no table scan.
     if (-not $UpgradeDate) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-            -Detail "Session history is kept for $weeks week(s). Sessions predating the environment upgrade cause migration to fail, and this check cannot tell whether $weeks week(s) reaches back past that upgrade without knowing its date." `
-            -Recommendation "Compare $weeks week(s) against the date this environment was upgraded. If the window reaches back before the upgrade, reduce it so those sessions age out. Re-run with -UpgradeDate <date> to have this decided automatically." `
+            -Detail "Session history is kept for $weeks week(s). Sessions predating the upgrade to v12 cause migration to fail - the problem is session data from v11 and earlier - and this check cannot tell whether $weeks week(s) reaches back past that upgrade without knowing its date." `
+            -Recommendation "Compare $weeks week(s) against the date this environment was upgraded to v12. If the window reaches back before that, reduce it so the older sessions age out. Re-run with -UpgradeDate <date of the v12 upgrade> to have this decided automatically." `
             -Evidence $ev
     }
 
@@ -636,14 +640,20 @@ function Test-SessionHistoryAge {
     # PowerShell binds '-UpgradeDate 0' to DateTime.MinValue without complaint, which
     # computed 105690 weeks since "the upgrade on 0001-01-01" and returned a confident
     # Pass - a mistyped parameter clearing the very check meant to catch this blocker.
-    # A future date cannot describe an upgrade that has already happened, and Veeam
-    # Backup & Replication did not exist before 2008, so neither can be a real cutoff.
-    $earliestPlausible = [datetime] '2008-01-01'
+    # A future date cannot describe an upgrade that has already happened. The floor is
+    # v12's own existence: the date being asked for is when this environment moved TO v12,
+    # so anything earlier is not that date - most likely the v11 upgrade date, or a
+    # mistyped year. That catches a realistic mistake, not just DateTime.MinValue.
+    $earliestPlausible = [datetime] '2023-01-01'
     if ($cutoff -lt $earliestPlausible -or $cutoff -gt (Get-Date)) {
-        $why = if ($cutoff -gt (Get-Date)) { 'is in the future' } else { 'predates Veeam Backup & Replication' }
+        $why = if ($cutoff -gt (Get-Date)) {
+            'is in the future'
+        } else {
+            'predates Veeam Backup & Replication v12, so it cannot be the date this environment was upgraded to v12'
+        }
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-            -Detail "The upgrade date supplied ($cutoffStr) $why, so it cannot be this environment's upgrade date and session-history retention was not judged against it. Session history is kept for $weeks week(s)." `
-            -Recommendation "Re-run supplying the date this environment was upgraded, as -UpgradeDate yyyy-MM-dd (for example -UpgradeDate 2024-03-15). Then compare that against the $weeks week(s) of history being kept." `
+            -Detail "The upgrade date supplied ($cutoffStr) $why. Session-history retention was therefore not judged against it. Session history is kept for $weeks week(s)." `
+            -Recommendation "Re-run supplying the date this environment was upgraded to v12, as -UpgradeDate yyyy-MM-dd (for example -UpgradeDate 2024-03-15). What breaks migration is session data written by v11 and earlier, so that is the boundary to compare the $weeks week(s) of retention against." `
             -Evidence $ev
     }
 
@@ -665,7 +675,7 @@ function Test-SessionHistoryAge {
 
     $target = [math]::Max(1, $weeksSince - 1)
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Action `
-        -Detail "Session history is kept for $weeks week(s), which reaches back to or past the upgrade on $cutoffStr ($weeksSince week(s) ago) - so job sessions predating the upgrade may still be in the database. KB4800 lists those sessions as a cause of migration failure." `
+        -Detail "Session history is kept for $weeks week(s), which reaches back to or past the v12 upgrade on $cutoffStr ($weeksSince week(s) ago) - so job sessions predating that upgrade may still be in the database. KB4800 lists those sessions - written by v11 and earlier - as a cause of migration failure." `
         -Recommendation "Reduce session-history retention to fewer than $weeksSince week(s) (e.g. Set-VBRHistoryOptions -RetentionLimitWeeks $target), allow the old sessions to be pruned, then re-run this check before migrating." `
         -Evidence $ev
 }
@@ -1453,24 +1463,22 @@ function Test-RoleAssignmentUpnFormat {
     # Veeam's input syntax for naming a group, not a real UPN - but the shape the
     # appliance wants is the same '@' form either way, so both are flagged the same;
     # only the remediation wording differs.
-    # The target form differs by principal type, and naming the wrong one sends the
-    # operator to do something that fails:
-    #   domain USER  -> user@fqdn
-    #   domain GROUP -> group@domain, e.g. Administrators@tech.local
-    # (Veeam UG, Configuring Users and Roles: "To add a default domain security group,
-    # use the group@domain format".) A group has no userPrincipalName in AD - this is
-    # Veeam's input syntax for naming a group, not a real UPN - but the shape the
-    # appliance wants is the same '@' form either way, so both are flagged the same;
-    # only the remediation wording differs.
     #
-    # OPEN QUESTION: whether a down-level DOMAIN\principal is in fact acceptable as a
-    # stored ASSIGNMENT. The evidence for requiring '@' is the appliance SIGN-IN form
-    # rejecting a non-UPN username, which constrains what a person types at login - not
-    # necessarily the stored string, since VBR may match the two by SID. Until that is
-    # confirmed this check reports the prefixed forms; do not narrow it on reasoning
-    # alone.
+    # The group form is CONFIRMED on working appliances, not just documented: one holds
+    # several domain security groups in group@domain form, and on another a user whose only
+    # grant was membership of such a group signed in successfully. So group-based access
+    # does have an appliance equivalent.
+    #
+    # STILL OPEN: whether a down-level DOMAIN\principal is acceptable as a stored
+    # ASSIGNMENT. The evidence for requiring '@' is the appliance SIGN-IN form rejecting a
+    # non-UPN username, which constrains what a person types at login - not necessarily
+    # the stored string, since VBR may match the two by SID. If a stored DOMAIN\principal
+    # turns out to work, this check over-flags and should narrow to builtin/local only.
+    # Until that is tested on an appliance, it reports the prefixed forms; do not narrow
+    # it on reasoning alone.
     $bad = @()
     $ok  = 0
+    $readAssignments = $false
     try {
         foreach ($ra in Get-VBRUserRoleAssignment -ErrorAction SilentlyContinue) {
             $nm = [string]$ra.Name
@@ -1493,15 +1501,32 @@ function Test-RoleAssignmentUpnFormat {
                 }
             $bad += "$nm  [$(if ($type) { $type } else { 'type not reported' }), role: $role]  -> $why"
         }
+        $readAssignments = $true
     } catch { }
+
+    # A count of zero is not a clean result here. An unread collection is empty, and
+    # "All 0 assignments already use the required form" is a confident clean statement
+    # derived from nothing - the same fail-open that AGT-004 and JOB-002 had, hidden in
+    # this one because the Pass already carried a number and a zero looked like a count.
+    # Zero is also impossible on a real server: a backup server always has at least one
+    # role assignment, so seeing none means the read did not work.
+    if ($bad.Count -eq 0 -and (-not $readAssignments -or $ok -eq 0)) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'No console role assignments could be read on this server, so their format was not checked. A backup server always has at least one assignment, so none being returned means they could not be enumerated.' `
+            -Recommendation 'Check Users & Roles by hand. Console login on the Veeam Software Appliance needs an @ form: a domain user as user@fqdn, a domain security group as group@domain. Local and builtin principals have no counterpart on the appliance.'
+    }
 
     if ($bad.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
             -Detail "All $ok console role assignment(s) already use the domain form the appliance requires (user@fqdn for a user, group@domain for a group)."
     }
 
+    # State the denominator, not just the count of findings. Without it, "2 assignments
+    # are not in the required form" reads the same whether it examined two and both were
+    # wrong or examined three and one was fine - and that ambiguity made a real
+    # discrepancy against the console undiagnosable from the report alone.
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Action `
-        -Detail "$($bad.Count) console role assignment(s) are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created." `
+        -Detail "$($bad.Count) of $($bad.Count + $ok) console role assignment(s) read on this server are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created." `
         -Recommendation 'Before migrating, re-create each assignment below in the appliance form: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: "Specify a username in the UPN format (username@domain.com)."' `
         -Evidence ($bad | Sort-Object -Unique)
 }
