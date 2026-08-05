@@ -30,6 +30,12 @@ produces.
 - A further set of build-invariant tests is kept in the development tree rather than here:
   they assert on the build outputs and version files of that tree, which have no counterpart
   in this repository.
+- **Continuous integration.** The suite runs on every push and pull request, on both Windows
+  and Linux runners. Windows is the platform the tool runs on; Linux proves the suite does
+  not depend on ambient machine identity, since SEC-004 reads the computer name, the user
+  domain and CIM, all of which are absent or different off Windows. The workflow fails if no
+  tests are discovered — a green run that executed nothing is the same class of defect as a
+  check reporting a clean result while measuring nothing.
 
 ### Changed
 ### Fixed

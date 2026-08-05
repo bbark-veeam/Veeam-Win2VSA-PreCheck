@@ -1,0 +1,64 @@
+name: tests
+
+# The checks are read-only and the tests mock every Veeam cmdlet, so no VBR server
+# and no Veeam module are involved. Both runners are used deliberately: Windows is
+# the platform the tool actually runs on, and Linux proves the suite does not depend
+# on ambient machine identity (SEC-004 reads COMPUTERNAME/USERDOMAIN and CIM, all of
+# which are absent or different off Windows).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pester:
+    name: Pester (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $have = Get-Module -ListAvailable Pester |
+                    Where-Object { $_.Version -ge [version]'5.0.0' } |
+                    Sort-Object Version -Descending |
+                    Select-Object -First 1
+          if (-not $have) {
+              # windows-latest ships Pester 3.4 in the system modules, which is a
+              # different product; -SkipPublisherCheck is required to sit beside it.
+              Install-Module Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck -Scope CurrentUser
+              $have = Get-Module -ListAvailable Pester |
+                        Where-Object { $_.Version -ge [version]'5.0.0' } |
+                        Sort-Object Version -Descending |
+                        Select-Object -First 1
+          }
+          "Pester $($have.Version) on PowerShell $($PSVersionTable.PSVersion)"
+
+      - name: Run the tests
+        shell: pwsh
+        working-directory: src
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Pester -MinimumVersion 5.0.0
+
+          $r = Invoke-Pester -Path ./tests -Output Detailed -PassThru
+
+          "total=$($r.TotalCount) passed=$($r.PassedCount) failed=$($r.FailedCount) skipped=$($r.SkippedCount)"
+
+          # A green run that executed nothing is the same class of defect as a check
+          # that reports Pass while measuring nothing - the failure this whole suite
+          # exists to catch. Assert the suite actually ran.
+          if ($r.TotalCount -eq 0) { throw 'No tests were discovered - the suite did not run.' }
+          if ($r.FailedCount -gt 0) { throw "$($r.FailedCount) test(s) failed." }
