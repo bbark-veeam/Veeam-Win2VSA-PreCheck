@@ -32,6 +32,10 @@ BeforeAll {
     $global:MockPluginHosts = @()
     $global:MockNimble      = @()
     $global:MockCreds       = @()
+    $global:MockLicense     = $null
+    $global:MockHistory     = $null
+    $global:MockCloudTenants  = @()
+    $global:MockCloudGateways = @()
 
     # Cmdlets named here throw instead of returning data. That is how an unreadable
     # collection actually presents in the field - a licence-dependent cmdlet (see
@@ -54,6 +58,18 @@ BeforeAll {
     function global:Get-StoragePluginHost          { param($ErrorAction) Assert-MockOk 'Get-StoragePluginHost'; $global:MockPluginHosts }
     function global:Get-NimbleHost                 { param($ErrorAction) Assert-MockOk 'Get-NimbleHost'; $global:MockNimble }
     function global:Get-VBRCredentials             { param($ErrorAction) Assert-MockOk 'Get-VBRCredentials'; $global:MockCreds }
+    function global:Get-VBRInstalledLicense       { param($ErrorAction) Assert-MockOk 'Get-VBRInstalledLicense'; $global:MockLicense }
+    function global:Get-VBRHistoryOptions        { param($ErrorAction) Assert-MockOk 'Get-VBRHistoryOptions'; $global:MockHistory }
+    # DB-001 reads the retention SETTING, never the sessions. This stub fails loudly if
+    # anything reaches for the sessions again: the cmdlet has no date filter and no
+    # ordering, so touching it materialises every session on the server - the original
+    # fleet-scale cost this check was rewritten to avoid.
+    function global:Get-VBRBackupSession {
+        param($ErrorAction)
+        throw 'Get-VBRBackupSession must never be called: it has no date filter or ordering, so reading it loads every session on the server.'
+    }
+    function global:Get-VBRCloudTenant            { param($ErrorAction) Assert-MockOk 'Get-VBRCloudTenant'; $global:MockCloudTenants }
+    function global:Get-VBRCloudGateway           { param($ErrorAction) Assert-MockOk 'Get-VBRCloudGateway'; $global:MockCloudGateways }
     function global:Get-VBRBackupRepository        { param($ErrorAction) $global:MockRepos }
     function global:Get-VBRUserRoleAssignment      { param($ErrorAction) $global:MockRoles }
     function global:Get-VBRJob                     { param($ErrorAction) $global:MockJobs }
@@ -90,6 +106,18 @@ BeforeAll {
         $global:MockCdp = @(); $global:MockTenants = @(); $global:MockNetApp = @()
         $global:MockPluginHosts = @(); $global:MockNimble = @(); $global:MockCreds = @()
         $global:MockThrow = @()
+        $global:MockLicense = $null; $global:MockHistory = $null
+        $global:MockCloudTenants = @(); $global:MockCloudGateways = @()
+    }
+
+    # DB-001 is the only check taking a parameter beyond -Ctx, so it needs its own invoker.
+    function Invoke-DbCheck {
+        param($UpgradeDate)
+        if ($null -eq $UpgradeDate) {
+            & $script:Mod ([scriptblock]::Create('param($c) Test-SessionHistoryAge -Ctx $c')) $script:Ctx
+        } else {
+            & $script:Mod ([scriptblock]::Create('param($c,$d) Test-SessionHistoryAge -Ctx $c -UpgradeDate $d')) $script:Ctx $UpgradeDate
+        }
     }
 }
 
@@ -590,5 +618,213 @@ Describe 'SEC-002 counted credential review' {
 
     It 'distinguishes an empty credential store from a clean one' {
         (Invoke-Check 'Test-CredentialUpnFormat').Detail | Should -Match 'read successfully and is empty'
+    }
+}
+
+Describe 'ENV-002 licence model' {
+    BeforeEach { Reset-MockState }
+
+    # Shapes below use the members confirmed by reflection on a real licence object:
+    # VBRSocketLicenseSummary   -> LicensedSocketsNumber (int)
+    # VBRInstanceLicenseSummary -> LicensedInstancesNumber (double)
+    # A socket licence cannot be obtained for testing - socket licensing is deprecated -
+    # so the socket VALUES here are synthetic while the SHAPE is not.
+
+    # THE DEFECT THIS PINS: an instance licence still returns ONE SocketLicenseSummary
+    # entry, containing ZERO sockets. Testing the array's Count instead of the socket
+    # figure inside it reported a socket licence on an instance-licensed server, telling
+    # the operator to convert a licence that needed no conversion.
+    It 'does not call an instance licence socket-based just because a socket summary exists' {
+        $global:MockLicense = [pscustomobject]@{
+            Type = 'Subscription'; Edition = 'EnterprisePlus'; CloudConnect = 'Disabled'
+            SocketLicenseSummary   = @([pscustomobject]@{ LicensedSocketsNumber = 0; UsedSocketsNumber = 0; RemainingSocketsNumber = 0 })
+            InstanceLicenseSummary = [pscustomobject]@{ LicensedInstancesNumber = 500; UsedInstancesNumber = 214 }
+        }
+        $r = Invoke-Check 'Test-VbrLicense'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'Instance-based'
+        ($r.Evidence -join ';') | Should -Match 'Licensed sockets counted=0'
+        # Assert the real figure, not just that the check said "instance-based". If the
+        # instance member name were wrong the check would fall back to the word
+        # "present" and still return Pass, so without this the count is unverified -
+        # a clean result carrying a number that nothing checks is the same trap as a
+        # clean result carrying no number at all.
+        $r.Detail | Should -Match 'instances=500'
+    }
+
+    # The fallback above is deliberate, not an accident: an instance summary that exists
+    # but exposes no countable figure still means an instance licence, so the status must
+    # stay Pass. This pins that it degrades to saying so rather than inventing a number.
+    It 'still passes when the instance summary carries no countable figure' {
+        $global:MockLicense = [pscustomobject]@{
+            Type = 'Subscription'; Edition = 'EnterprisePlus'; CloudConnect = 'Disabled'
+            SocketLicenseSummary   = @()
+            InstanceLicenseSummary = [pscustomobject]@{ SomethingElse = 1 }
+        }
+        $r = Invoke-Check 'Test-VbrLicense'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'instances=present'
+    }
+
+    It 'flags a genuine socket licence' {
+        $global:MockLicense = [pscustomobject]@{
+            Type = 'Perpetual'; Edition = 'EnterprisePlus'; CloudConnect = 'Disabled'
+            SocketLicenseSummary   = @([pscustomobject]@{ LicensedSocketsNumber = 4; UsedSocketsNumber = 4; RemainingSocketsNumber = 0 })
+            InstanceLicenseSummary = $null
+        }
+        $r = Invoke-Check 'Test-VbrLicense'
+        $r.Status | Should -Be 'Action'
+        $r.Detail | Should -Match '4 licensed socket'
+    }
+
+    It 'sums sockets across multiple summary entries' {
+        $global:MockLicense = [pscustomobject]@{
+            Type = 'Perpetual'; Edition = 'Standard'; CloudConnect = 'Disabled'
+            SocketLicenseSummary   = @(
+                [pscustomobject]@{ LicensedSocketsNumber = 2 }
+                [pscustomobject]@{ LicensedSocketsNumber = 6 }
+            )
+            InstanceLicenseSummary = $null
+        }
+        (Invoke-Check 'Test-VbrLicense').Detail | Should -Match '8 licensed socket'
+    }
+
+    # Reported as unknown rather than guessed in either direction: guessing "socket"
+    # prescribes needless work, guessing "instance" hides a real blocker.
+    It 'reports Info when a socket summary exposes no countable figure and there is no instance summary' {
+        $global:MockLicense = [pscustomobject]@{
+            Type = 'Perpetual'; Edition = 'Standard'; CloudConnect = 'Disabled'
+            SocketLicenseSummary   = @([pscustomobject]@{ SomethingElse = 1 })
+            InstanceLicenseSummary = $null
+        }
+        (Invoke-Check 'Test-VbrLicense').Status | Should -Be 'Info'
+    }
+
+    It 'reports Info when no licence object comes back' {
+        $global:MockLicense = $null
+        (Invoke-Check 'Test-VbrLicense').Status | Should -Be 'Info'
+    }
+}
+
+Describe 'DEP-001 Cloud Connect' {
+    BeforeEach { Reset-MockState }
+
+    # Read from the licence itself. The Cloud Connect cmdlets THROW without a provider
+    # licence, so the Disabled path must never reach them - avoiding the exception rather
+    # than catching it. Asserted by making them throw if touched.
+    It 'passes on a non-Cloud-Connect licence without calling the Cloud Connect cmdlets' {
+        $global:MockLicense = [pscustomobject]@{ Type = 'Subscription'; CloudConnect = 'Disabled' }
+        $global:MockThrow = @('Get-VBRCloudTenant', 'Get-VBRCloudGateway')
+        $r = Invoke-Check 'Test-CloudConnect'
+        $r.Status | Should -Be 'Pass'
+        ($r.Evidence -join ';') | Should -Match 'Disabled'
+    }
+
+    It 'blocks when the licence reports Cloud Connect enabled, and enumerates the evidence' {
+        $global:MockLicense = [pscustomobject]@{ Type = 'Perpetual'; CloudConnect = 'Enabled' }
+        $global:MockCloudTenants  = @([pscustomobject]@{ Name = 'tenant-a' }, [pscustomobject]@{ Name = 'tenant-b' })
+        $global:MockCloudGateways = @([pscustomobject]@{ Name = 'cc-gw-01' })
+        $r = Invoke-Check 'Test-CloudConnect'
+        $r.Status | Should -Be 'Blocker'
+        $r.Detail | Should -Match '2 tenant\(s\), 1 gateway\(s\)'
+        ($r.Evidence -join ';') | Should -Match 'tenant-a'
+    }
+
+    It 'blocks on the Enterprise mode as well' {
+        $global:MockLicense = [pscustomobject]@{ Type = 'Perpetual'; CloudConnect = 'Enterprise' }
+        (Invoke-Check 'Test-CloudConnect').Status | Should -Be 'Blocker'
+    }
+
+    # Blocker-grade check, so an unreadable mode is never guessed in either direction.
+    It 'reports Info on an unreadable Cloud Connect mode rather than guessing' {
+        $global:MockLicense = [pscustomobject]@{ Type = 'Perpetual'; CloudConnect = 'Invalid' }
+        (Invoke-Check 'Test-CloudConnect').Status | Should -Be 'Info'
+    }
+
+    It 'reports Info when the licence cannot be read at all' {
+        $global:MockThrow = @('Get-VBRInstalledLicense')
+        (Invoke-Check 'Test-CloudConnect').Status | Should -Be 'Info'
+    }
+
+    # Cloud Connect tenants can still be enumerated when licensed; the Blocker must not
+    # depend on them, since the licence is the authoritative signal.
+    It 'blocks even when no tenants or gateways are configured yet' {
+        $global:MockLicense = [pscustomobject]@{ Type = 'Perpetual'; CloudConnect = 'Enabled' }
+        (Invoke-Check 'Test-CloudConnect').Status | Should -Be 'Blocker'
+    }
+}
+
+Describe 'DB-001 session-history retention' {
+    BeforeEach { Reset-MockState; $global:MockHistory = [pscustomobject]@{ KeepAllSessions = $false; RetentionLimitWeeks = 13 } }
+
+    # Confirmed live on the lab (13-week retention) against three cutoffs. The Pass
+    # branch is therefore real evidence; these pin it against regression.
+    It 'passes when retention is shorter than the time since the upgrade' {
+        $r = Invoke-DbCheck -UpgradeDate (Get-Date).AddYears(-2)
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'shorter than'
+    }
+
+    # The branch three live runs could NOT reach: it needs a cutoff between 1 and 13
+    # weeks ago, and every date tried was further back than the retention window.
+    It 'flags retention that reaches back past the upgrade, and names a target' {
+        $r = Invoke-DbCheck -UpgradeDate (Get-Date).AddDays(-49)   # 7 weeks
+        $r.Status | Should -Be 'Action'
+        $r.Detail | Should -Match 'reaches back to or past the upgrade'
+        $r.Recommendation | Should -Match 'RetentionLimitWeeks 6'
+    }
+
+    # THE DEFECT THIS PINS: PowerShell binds '-UpgradeDate 0' to DateTime.MinValue, so
+    # the check reported "105690 week(s) since the upgrade on 0001-01-01" and returned a
+    # confident Pass. A mistyped parameter cleared the check meant to catch this blocker.
+    It 'refuses an implausible cutoff instead of passing on it' {
+        $r = Invoke-DbCheck -UpgradeDate ([datetime] 0)
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'predates Veeam Backup & Replication'
+        $r.Status | Should -Not -Be 'Pass'
+    }
+
+    It 'refuses a cutoff in the future' {
+        $r = Invoke-DbCheck -UpgradeDate (Get-Date).AddMonths(6)
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'is in the future'
+    }
+
+    It 'reports Action when history is set to keep everything' {
+        $global:MockHistory = [pscustomobject]@{ KeepAllSessions = $true; RetentionLimitWeeks = 13 }
+        $r = Invoke-DbCheck -UpgradeDate (Get-Date).AddYears(-2)
+        $r.Status | Should -Be 'Action'
+        $r.Detail | Should -Match 'keep ALL sessions'
+    }
+
+    It 'defers when no cutoff is supplied, stating the retention it read' {
+        $r = Invoke-DbCheck -UpgradeDate $null
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match '13 week'
+    }
+
+    # Retention is whole weeks, so a cutoff under a week old has no value that would age
+    # sessions out - advising a reduction would be an impossible instruction.
+    It 'does not advise an impossible reduction for a cutoff less than a week old' {
+        $r = Invoke-DbCheck -UpgradeDate (Get-Date).AddDays(-3)
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'less than a week ago'
+    }
+
+    It 'reports Info when the retention period cannot be read' {
+        $global:MockHistory = [pscustomobject]@{ KeepAllSessions = $false }
+        (Invoke-DbCheck -UpgradeDate (Get-Date).AddYears(-2)).Status | Should -Be 'Info'
+    }
+
+    It 'reports Info when the options object cannot be retrieved' {
+        $global:MockHistory = $null
+        (Invoke-DbCheck -UpgradeDate (Get-Date).AddYears(-2)).Status | Should -Be 'Info'
+    }
+
+    # The whole point of the rewrite: judge the SETTING, never enumerate the sessions.
+    # The stub throws if the session cmdlet is touched, so any run reaching it fails here.
+    It 'never reads the session list' {
+        { Invoke-DbCheck -UpgradeDate (Get-Date).AddYears(-2) } | Should -Not -Throw
+        { Invoke-DbCheck -UpgradeDate $null } | Should -Not -Throw
     }
 }

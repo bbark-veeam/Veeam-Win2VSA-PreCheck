@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.4.2
-#  Built   : 2026-08-05 14:17:09
+#  Version : 0.4.3
+#  Built   : 2026-08-05 15:43:15
 #  Sources : 15 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.4.2'
+$script:PrecheckVersion = '0.4.3'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -632,6 +632,21 @@ function Test-SessionHistoryAge {
     $cutoffStr     = $cutoff.ToString('yyyy-MM-dd')
     $ev           += @("Upgrade cutoff=$cutoffStr", "Weeks since cutoff=$weeksSince")
 
+    # The supplied date has to be plausible before anything is concluded from it.
+    # PowerShell binds '-UpgradeDate 0' to DateTime.MinValue without complaint, which
+    # computed 105690 weeks since "the upgrade on 0001-01-01" and returned a confident
+    # Pass - a mistyped parameter clearing the very check meant to catch this blocker.
+    # A future date cannot describe an upgrade that has already happened, and Veeam
+    # Backup & Replication did not exist before 2008, so neither can be a real cutoff.
+    $earliestPlausible = [datetime] '2008-01-01'
+    if ($cutoff -lt $earliestPlausible -or $cutoff -gt (Get-Date)) {
+        $why = if ($cutoff -gt (Get-Date)) { 'is in the future' } else { 'predates Veeam Backup & Replication' }
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "The upgrade date supplied ($cutoffStr) $why, so it cannot be this environment's upgrade date and session-history retention was not judged against it. Session history is kept for $weeks week(s)." `
+            -Recommendation "Re-run supplying the date this environment was upgraded, as -UpgradeDate yyyy-MM-dd (for example -UpgradeDate 2024-03-15). Then compare that against the $weeks week(s) of history being kept." `
+            -Evidence $ev
+    }
+
     if ($weeks -lt $weeksSince) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
             -Detail "Session history is kept for $weeks week(s), which is shorter than the $weeksSince week(s) since the upgrade on $cutoffStr - so any sessions predating the upgrade have already aged out of the database." `
@@ -870,30 +885,34 @@ function Test-VbrLicense {
     # Count the SOCKETS, not the array entries: an instance-based licence still
     # returns a SocketLicenseSummary entry, containing zero sockets. If no entry
     # exposes a countable figure the verdict is unknown, not "socket-based".
+    # VBRSocketLicenseSummary exposes LicensedSocketsNumber / RemainingSocketsNumber /
+    # UsedSocketsNumber / Workload - confirmed by reflection on a real licence object, so
+    # the name is not a guess. Earlier revisions probed a list of alternatives; none of
+    # them exists, and one of them ('Count') would be actively dangerous if a future
+    # build ever exposed it, because a collection count read as a socket count reproduces
+    # the false Action this check already had once.
     $sockets      = 0
     $socketCountable = $false
     foreach ($ss in $socketSummary) {
         if ($null -eq $ss) { continue }
-        foreach ($p in 'LicensedSocketsNumber', 'LicensedSockets', 'SocketsNumber', 'Sockets', 'Count', 'Total') {
-            if ($ss.PSObject.Properties[$p] -and $null -ne $ss.$p) {
-                $n = 0
-                if ([int]::TryParse("$($ss.$p)", [ref]$n)) {
-                    $sockets += $n
-                    $socketCountable = $true
-                    break
-                }
+        if ($ss.PSObject.Properties['LicensedSocketsNumber'] -and $null -ne $ss.LicensedSocketsNumber) {
+            $n = 0
+            if ([int]::TryParse("$($ss.LicensedSocketsNumber)", [ref]$n)) {
+                $sockets += $n
+                $socketCountable = $true
             }
         }
     }
 
     # Instances: the summary object carries the counts; probe its own members
     # rather than assuming one name.
+    # VBRInstanceLicenseSummary exposes LicensedInstancesNumber (a double) - also
+    # reflection-confirmed, same reasoning as the socket count above.
     $instances = $null
     if ($instanceSummary) {
-        foreach ($p in 'LicensedInstancesNumber', 'LicensedInstances', 'TotalInstances', 'Count') {
-            if ($instanceSummary.PSObject.Properties[$p] -and $null -ne $instanceSummary.$p) {
-                $instances = $instanceSummary.$p; break
-            }
+        if ($instanceSummary.PSObject.Properties['LicensedInstancesNumber'] -and
+            $null -ne $instanceSummary.LicensedInstancesNumber) {
+            $instances = $instanceSummary.LicensedInstancesNumber
         }
         # Present but uncountable still means an instance licence exists.
         if ($null -eq $instances) { $instances = 'present' }

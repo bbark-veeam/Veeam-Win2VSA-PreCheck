@@ -66,30 +66,34 @@ function Test-VbrLicense {
     # Count the SOCKETS, not the array entries: an instance-based licence still
     # returns a SocketLicenseSummary entry, containing zero sockets. If no entry
     # exposes a countable figure the verdict is unknown, not "socket-based".
+    # VBRSocketLicenseSummary exposes LicensedSocketsNumber / RemainingSocketsNumber /
+    # UsedSocketsNumber / Workload - confirmed by reflection on a real licence object, so
+    # the name is not a guess. Earlier revisions probed a list of alternatives; none of
+    # them exists, and one of them ('Count') would be actively dangerous if a future
+    # build ever exposed it, because a collection count read as a socket count reproduces
+    # the false Action this check already had once.
     $sockets      = 0
     $socketCountable = $false
     foreach ($ss in $socketSummary) {
         if ($null -eq $ss) { continue }
-        foreach ($p in 'LicensedSocketsNumber', 'LicensedSockets', 'SocketsNumber', 'Sockets', 'Count', 'Total') {
-            if ($ss.PSObject.Properties[$p] -and $null -ne $ss.$p) {
-                $n = 0
-                if ([int]::TryParse("$($ss.$p)", [ref]$n)) {
-                    $sockets += $n
-                    $socketCountable = $true
-                    break
-                }
+        if ($ss.PSObject.Properties['LicensedSocketsNumber'] -and $null -ne $ss.LicensedSocketsNumber) {
+            $n = 0
+            if ([int]::TryParse("$($ss.LicensedSocketsNumber)", [ref]$n)) {
+                $sockets += $n
+                $socketCountable = $true
             }
         }
     }
 
     # Instances: the summary object carries the counts; probe its own members
     # rather than assuming one name.
+    # VBRInstanceLicenseSummary exposes LicensedInstancesNumber (a double) - also
+    # reflection-confirmed, same reasoning as the socket count above.
     $instances = $null
     if ($instanceSummary) {
-        foreach ($p in 'LicensedInstancesNumber', 'LicensedInstances', 'TotalInstances', 'Count') {
-            if ($instanceSummary.PSObject.Properties[$p] -and $null -ne $instanceSummary.$p) {
-                $instances = $instanceSummary.$p; break
-            }
+        if ($instanceSummary.PSObject.Properties['LicensedInstancesNumber'] -and
+            $null -ne $instanceSummary.LicensedInstancesNumber) {
+            $instances = $instanceSummary.LicensedInstancesNumber
         }
         # Present but uncountable still means an instance licence exists.
         if ($null -eq $instances) { $instances = 'present' }

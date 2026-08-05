@@ -67,6 +67,21 @@ function Test-SessionHistoryAge {
     $cutoffStr     = $cutoff.ToString('yyyy-MM-dd')
     $ev           += @("Upgrade cutoff=$cutoffStr", "Weeks since cutoff=$weeksSince")
 
+    # The supplied date has to be plausible before anything is concluded from it.
+    # PowerShell binds '-UpgradeDate 0' to DateTime.MinValue without complaint, which
+    # computed 105690 weeks since "the upgrade on 0001-01-01" and returned a confident
+    # Pass - a mistyped parameter clearing the very check meant to catch this blocker.
+    # A future date cannot describe an upgrade that has already happened, and Veeam
+    # Backup & Replication did not exist before 2008, so neither can be a real cutoff.
+    $earliestPlausible = [datetime] '2008-01-01'
+    if ($cutoff -lt $earliestPlausible -or $cutoff -gt (Get-Date)) {
+        $why = if ($cutoff -gt (Get-Date)) { 'is in the future' } else { 'predates Veeam Backup & Replication' }
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "The upgrade date supplied ($cutoffStr) $why, so it cannot be this environment's upgrade date and session-history retention was not judged against it. Session history is kept for $weeks week(s)." `
+            -Recommendation "Re-run supplying the date this environment was upgraded, as -UpgradeDate yyyy-MM-dd (for example -UpgradeDate 2024-03-15). Then compare that against the $weeks week(s) of history being kept." `
+            -Evidence $ev
+    }
+
     if ($weeks -lt $weeksSince) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
             -Detail "Session history is kept for $weeks week(s), which is shorter than the $weeksSince week(s) since the upgrade on $cutoffStr - so any sessions predating the upgrade have already aged out of the database." `

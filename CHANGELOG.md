@@ -17,6 +17,47 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.4.3] - 2026-08-05
+### Fixed
+- **DB-001 accepted an implausible upgrade date and turned it into a confident `Pass`.**
+  PowerShell binds `-UpgradeDate 0` to `DateTime.MinValue` without complaint, so the check
+  computed "105690 week(s) since the upgrade on 0001-01-01" and cleared the server. A
+  mistyped parameter therefore passed the one check meant to catch this blocker — and since
+  the customer runs the tool themselves, per server, a typo or an empty variable in a script
+  is a realistic way to get there. A supplied cutoff is now sanity-checked first: one in the
+  future, or one predating Veeam Backup & Replication, returns `Manual` naming which it is.
+  Found by running the tool with a deliberately odd date rather than by reading the code.
+
+### Changed
+- **ENV-002 now reads the licence members confirmed by reflection** —
+  `VBRSocketLicenseSummary.LicensedSocketsNumber` and
+  `VBRInstanceLicenseSummary.LicensedInstancesNumber` — instead of probing a list of
+  candidate names. Every fallback in those lists provably does not exist on the real types,
+  and one of them, `Count`, would have been actively harmful: a collection count read as a
+  socket count reproduces the false `Action` this check already had once, by a new route.
+
+### Added
+- **Tests for ENV-002, DEP-001 and DB-001** (86 shipped tests total, up from 76), each case
+  mutation-validated — 21 mutations across the three, all caught.
+  - ENV-002 pins the defect that actually happened: an instance licence returns *one* socket
+    summary entry containing *zero* sockets, so testing the array's length instead of the
+    figure inside it reported a socket licence on an instance-licensed server. The socket
+    values are synthetic because socket licensing is deprecated and one cannot be obtained;
+    the *shape* is reflection-confirmed, and the reference now says so rather than implying
+    the path was verified against a real socket licence.
+  - DEP-001 asserts the Cloud Connect cmdlets are **never called** when the licence reports
+    `Disabled`, by making them throw if touched — avoiding the exception rather than
+    catching it, which is what kept this check quiet on non-provider servers.
+  - DB-001 covers all eight branches and asserts `Get-VBRBackupSession` is never reached,
+    by stubbing it to throw. Its `Pass` and `Action` branches are both now **validated live**
+    as well, across four lab runs at different cutoffs.
+- **A test for the graceful-degradation path in ENV-002.** Mutation testing exposed a hole in
+  the first version of these tests: reading a wrong instance member name changed nothing,
+  because the check falls back to the word "present" and still returns `Pass`. The status was
+  right but the *number* was silently unverified — a clean result carrying a figure that
+  nothing checks is the same trap as one carrying no figure at all. The test now asserts the
+  real count, with a separate case pinning the fallback as deliberate.
+
 ## [0.4.2] - 2026-08-05
 ### Fixed
 - **Four checks failed OPEN, returning a clean result when they could not read anything.**
