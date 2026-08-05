@@ -17,6 +17,33 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.4.5] - 2026-08-05
+### Fixed
+- **The published checks reference was badly stale, and it is the document that tells a
+  customer how much to trust each result.** `CHECKS.md` is a manual copy of the development
+  reference, so it had drifted: it still rated **STG-001, STG-003, JOB-001 and DEP-003 as
+  "High"** after they were downgraded for having no supporting evidence, still rated SEC-004
+  and SEC-005 "Medium" after both were validated, named **`Get-VBRBackupSession`** as DB-001's
+  cmdlet when that was replaced precisely to stop reading it, and described DB-001 as
+  reporting the oldest session date, which it no longer does. A stale confidence column
+  misrepresents the tool's own confidence in itself, which is worse than having none.
+- **It also pointed customers at internal planning files** (`internal/lab/…`,
+  `internal/PROJECT-NOTES.md`, `LAB-PLAN`) that are not published and that they cannot open.
+  Those references are now stripped when the copy is made.
+
+### Added
+- **A drift guard for the published reference.** The build tests compare it to the
+  development reference **row by row** for all 25 checks, and assert it names no
+  development-tree path. Row-level comparison rather than whole-file, so the deliberate
+  path rewrites do not cause false failures. Same reasoning as the byte-identity gate on the
+  shipped script: a manual copy needs a machine to notice when it stops matching.
+
+### Changed
+- The SEC-005 note in the reference now describes the confirming evidence **without naming
+  the environments it came from**, and records two details useful when reading a report: the
+  principal name may come back **uppercased** where the console shows it mixed-case, and a
+  **space in a group name is preserved**.
+
 ## [0.4.4] - 2026-08-05
 ### Fixed
 - **DB-001 now says plainly that the date wanted is the upgrade to v12**, and why: what

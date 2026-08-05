@@ -13,27 +13,27 @@ against a real environment (see the caveat at the bottom).
 
 | ID | Category | Limitation (KB4800) | Primary cmdlet(s) | Possible status | Confidence |
 |----|----------|--------------------|-------------------|-----------------|------------|
-| ENV-001 | Environment | Source must be on the **13.0.x** train; **13.1 cannot migrate**. Builds newer than 13.1 return `Manual` — the check makes no claim about releases that have not shipped | `Get-VBRBackupServerInfo` / registry / core DLL | Pass / Action / Blocker / Manual / Info | High |
-| ENV-002 | Environment | VSA supports only instance-based VUL; socket must convert | `Get-VBRInstalledLicense` | Pass / Action / Info | Medium |
-| DEP-001 | Deployment | Cloud Connect deployments cannot migrate. Read from the licence itself (`.CloudConnect` = Enabled/Disabled/Enterprise/Invalid); tenants and gateways enrich the evidence | `Get-VBRInstalledLicense`, `Get-VBRCloudTenant`, `Get-VBRCloudGateway` | Pass / Blocker / Info | High |
+| ENV-001 | Environment | Source must be on the **13.0.x** train; **13.1 cannot migrate**. Builds newer than 13.1 return `Manual` — the check makes no claim about releases that have not shipped | `Get-VBRBackupServerInfo` / registry / core DLL | Pass / Action / Blocker / Manual / Info | High — validated live in both directions (13.1 → Blocker, 13.0.2 → Pass) |
+| ENV-002 | Environment | VSA supports only instance-based VUL; socket must convert | `Get-VBRInstalledLicense` | Pass / Action / Info | High — instance path validated live; socket path shape-confirmed by reflection, values synthetic (socket licensing is deprecated, so a socket licence cannot be obtained to test) |
+| DEP-001 | Deployment | Cloud Connect deployments cannot migrate. Read from the licence itself (`.CloudConnect` = Enabled/Disabled/Enterprise/Invalid); tenants and gateways enrich the evidence | `Get-VBRInstalledLicense`, `Get-VBRCloudTenant`, `Get-VBRCloudGateway` | Pass / Blocker / Info | High — Disabled path validated live; the Cloud Connect modes are mock-tested pending a provider licence |
 | DEP-002 | Deployment | Google Cloud plug-in config will not migrate (Windows-only). Detected from CONFIGURATION (`Get-VBRGoogleCloudAccount`, `Get-VBRGoogleCloudComputeAccount`) plus a job-name signal. The plug-in ships with VBR so installation proves nothing; external repositories are not examined | `Get-VBRGoogleCloud*Account`, `Get-VBRJob` | Pass / Warning / Manual | Medium |
-| DEP-003 | Deployment | Entra ID tenant backup **data** not migrated | `Get-VBREntraIDTenant` | Pass / Manual / Info | High |
+| DEP-003 | Deployment | Entra ID tenant backup **data** not migrated | `Get-VBREntraIDTenant` | Pass / Manual / Info | Medium - mock-tested |
 | AGT-001 | Agents | All agents must be v13+ to connect | `Get-VBRDiscoveredComputer` | Pass / Action / Manual | High — validated |
 | AGT-002 | Agents | Disabled agent policies must be applied/synced first. Keyed on `JobEnabled` (NOT `IsEnabled`, which does not exist; NOT `ScheduleEnabled`, which is a different thing). Whether config was applied is not exposed at all — see note | `Get-VBRComputerBackupJob` | Pass / Action / Info | High — validated |
-| AGT-003 | Agents | Mac agent domain accounts must become local (no Kerberos/NTLM) | `Get-VBRComputerBackupJob` | Pass / Manual | Low |
+| AGT-003 | Agents | Mac agent domain accounts must become local (no Kerberos/NTLM) | `Get-VBRComputerBackupJob` | Pass / Manual | Low - mock-tested; platform vocabulary still unconfirmed |
 | AGT-004 | Agents | Post-migration: rescan all PGs; pre-installed-agent PGs need new config file. Keyed on `Container.Type -eq ManuallyDeployed` — see note | `Get-VBRProtectionGroup` | Pass / Manual | High — validated |
-| STG-001 | Storage | NetApp ONTAP: only NAS filer role migrates | `Get-NetAppHost` (no VBR prefix) | Pass / Warning / Info | High |
-| STG-002 | Storage | IBM/Hitachi/HPE XP plug-in minimum versions post-migration | `Get-StoragePluginHost` (no VBR prefix) | Pass / Manual / Info | Medium |
-| STG-003 | Storage | HPE Nimble/Alletra FIPS-mode OS support | `Get-NimbleHost` (no VBR prefix) | Pass / Warning / Info | High |
-| JOB-001 | Jobs | CDP job config not migrated (manual re-create) | `Get-VBRCDPPolicy` | Pass / Warning / Info | High |
+| STG-001 | Storage | NetApp ONTAP: only NAS filer role migrates | `Get-NetAppHost` (no VBR prefix) | Pass / Warning / Info | Medium - mock-tested |
+| STG-002 | Storage | IBM/Hitachi/HPE XP plug-in minimum versions post-migration | `Get-StoragePluginHost` (no VBR prefix) | Pass / Manual / Info | Medium - mock-tested |
+| STG-003 | Storage | HPE Nimble/Alletra FIPS-mode OS support | `Get-NimbleHost` (no VBR prefix) | Pass / Warning / Info | Medium - mock-tested |
+| JOB-001 | Jobs | CDP job config not migrated (manual re-create) | `Get-VBRCDPPolicy` | Pass / Warning / Info | Medium - mock-tested |
 | JOB-002 | Jobs | SureBackup SQL Server Checker Script fails on VSA | `Get-VBRApplicationGroup` | Pass / Blocker / Manual | High — both paths validated |
 | JOB-003 | Jobs | Pre/post-job + pre-freeze/post-thaw scripts & CSVs copied manually. Reads all three surfaces — see note below. CSV files remain undetectable and are named as such | `Get-VBRJob`, `Get-VBRJobObject` | Pass / Manual | High — validated |
 | SEC-001 | Security | Four-eyes authorization disabled during migration | none exists → manual | Manual | n/a |
 | SEC-002 | Security | Non-UPN **Standard** credentials to review for Kerberos-authenticated connections | `Get-VBRCredentials` | Pass / Manual | Medium — see note |
 | SEC-003 | Security | Trusted-domain authentication unsupported | (manual) | Manual | n/a |
-| SEC-004 | Security | Local (non-domain) repo access accounts → "SID not found" | `Get-VBREPPermission` -Repository → `.Users` | Pass / Action / Manual / Info | Medium — see note |
-| SEC-005 | Security | Console role assignments must be UPN (appliance console login) — see note; the down-level question is OPEN (LAB-PLAN D3) | `Get-VBRUserRoleAssignment` | Pass / Action / Manual | Medium — premise partly unresolved |
-| DB-001 | Job history | Job-history sessions predating the upgrade cutoff fail migration | `Get-VBRBackupSession` | Pass / Action / Manual / Info | Medium |
+| SEC-004 | Security | Local (non-domain) repo access accounts → "SID not found" | `Get-VBREPPermission` -Repository → `.Users` | Pass / Action / Manual / Info | High — validated, both the flagging and the clean path |
+| SEC-005 | Security | Console role assignments must be UPN (appliance console login) — see note | `Get-VBRUserRoleAssignment` | Pass / Action / Manual | High — validated live: all three source shapes flagged with distinct reasons, and both appliance remediation forms confirmed on real appliances |
+| DB-001 | Job history | Job-history sessions predating the **upgrade to v12** fail migration (the limiting factor is v11-and-earlier session data) | `Get-VBRHistoryOptions` | Pass / Action / Manual / Info | High — Pass and Action both validated live |
 
 ### Pre-Migration Considerations (KB4800) → `NextStep`
 
@@ -51,12 +51,25 @@ v13, #7 local repo accounts are already enforced as limitation checks above.)
 | PRE-003 | File-to-tape: use the source server **short** hostname, resolvable | `Get-VBRTapeJob` | NextStep / Skipped |
 | PRE-004 | Match VSA timezone to this Windows machine (Hitachi / HPE XP) | `Get-StoragePluginHost` + `Get-TimeZone` | NextStep / Skipped |
 
-> **On DB-001's date (`-UpgradeDate`):** the check simply flags sessions created
-> *before* the supplied cutoff. KB4800's strict boundary is the **v12** upgrade
-> date (sessions predating the move to v12 cause failure). The **v13** upgrade
-> date works as a broader/conservative cutoff — it also catches legitimate v12-era
-> sessions, but the remedy (reduce history retention) is identical, so it errs
-> safe. With no date, DB-001 reports the oldest session date to compare by hand.
+> **On DB-001's date (`-UpgradeDate`): supply the date this environment was upgraded
+> to v12.** That is the boundary that matters, because **what breaks migration is
+> session data written by v11 and earlier** — sessions predating the move to v12.
+> A later date (the v13 upgrade, say) errs safe but **over-flags**: it also counts
+> legitimate v12-era sessions, so it can prescribe a retention reduction that is not
+> actually needed, which across a large estate is needless work. The `V13UpgradeDate`
+> alias is kept for anyone who only knows that date, not as the recommended input.
+>
+> A supplied date is rejected if it **predates v12's existence** — most likely the v11
+> upgrade date or a mistyped year, neither of which can be a v12 upgrade date.
+> With no date, DB-001 reports the **retention window it read** for the operator to
+> compare by hand — it does not enumerate sessions, because `Get-VBRBackupSession` has no
+> date filter or ordering, so reading it would materialise every session on the server.
+>
+> A supplied date is **sanity-checked before anything is concluded from it**: a cutoff in
+> the future, or one predating Veeam Backup & Replication itself, returns `Manual`.
+> PowerShell binds `-UpgradeDate 0` to `DateTime.MinValue` without complaint, and that
+> produced "105690 week(s) since the upgrade on 0001-01-01" and a confident `Pass` — a
+> mistyped parameter clearing the very check meant to catch this blocker.
 
 > **Cmdlet names verified** against the official A-Z reference
 > (`docs/reference/vbr-v13-cmdlets.md`, 1481 cmdlets). Every cmdlet named above
@@ -96,6 +109,16 @@ operator the wrong one sends them to do something that fails:
 
 Source: Veeam User Guide, *Configuring Users and Roles* — "To add a default domain
 security group, use the group@domain format, for example, Administrators@tech.local."
+
+**Confirmed on working appliances (2026-08-05), not just documented.** One appliance holds four
+domain security groups assigned as Backup Administrator, every one in `group@domain` form with
+Type `Group`. On another, a user whose only grant was membership of such a group signed in
+successfully — so a group assignment does not merely save, it authorises login, and group-based
+access has a real equivalent on the appliance.
+
+Two details from the same environments, worth knowing when reading a report: the name may be
+returned **uppercased** where the console displays it mixed-case, and a **space in a group name
+is preserved** (so `Domain Admins@example.local` is a valid value).
 
 `group@domain` is Veeam's **input syntax for naming a group, not a UPN.**
 `userPrincipalName` is an attribute of the AD *user* class; groups do not have one. That
@@ -273,5 +296,22 @@ checks are deliberately conservative: when a cmdlet or property is missing they
 degrade to **Manual/Info** with the correct guidance rather than a false Pass, so
 the tool never silently tells you a real blocker is clear.
 
-Checks marked **validated** have been exercised against a live Windows VBR 13.0.x
-server, in both the finding and the no-finding direction where that was possible.
+The three ratings mean different things, and the difference matters:
+
+- **validated** — exercised against a live Windows VBR 13.0.x server, in both the
+  finding and the no-finding direction where that was possible.
+- **mock-tested** — the detection logic is exercised by the test suite against a
+  mocked object shape, in both directions, but **has never seen a real object of
+  this kind.** The lab has no NetApp, no storage plug-in, no Nimble, no CDP policy,
+  no Entra ID tenant and no Mac agent, so STG-001/002/003, JOB-001, DEP-003 and
+  AGT-003 fall here. A mocked shape proves the logic does what it intends; it
+  cannot prove the shape matches the product. Treat the *property and value
+  vocabulary* of these checks as unconfirmed.
+- neither — the logic has not been exercised in either direction.
+
+**Why the distinction is not pedantic:** of the property probes this tool has
+written against an unvalidated object shape, **four of five turned out to be
+broken** — each returning nothing while reporting a confident clean result. A
+plausible member name is not evidence. The counted clean results exist so that if
+one of these is wrong, the report says how little it examined instead of implying
+it examined everything.
