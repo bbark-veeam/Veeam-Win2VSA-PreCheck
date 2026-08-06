@@ -29,18 +29,49 @@ function Test-CloudConnect {
     }
 
     if ($ccMode -ieq 'Enabled' -or $ccMode -ieq 'Enterprise') {
-        # Licence says Cloud Connect, so these cmdlets will work. Use them for detail.
+        # ⚠️ THE LICENCE FILE ITSELF IS THE BLOCKER. Tenants and gateways are evidence
+        # only, and their ABSENCE proves nothing. Do not make this conditional on finding
+        # any Cloud Connect architecture: Brad has seen this exact licence file block a
+        # real migration on a server with NO Cloud Connect architecture at all - no
+        # tenants, no gateways, no repositories. Requiring usage before blocking would
+        # have missed that, which is a false clean result on the highest-severity check
+        # in the tool.
+        #
+        # Measured corroboration: on one server across six runs an EnterprisePlus
+        # subscription reported CloudConnect = Disabled; installing a Cloud Connect
+        # licence on that same server - same type, same edition - flipped it to
+        # Enterprise. The property is not an artefact of the licence edition.
+        #
+        # So state plainly that the licence alone decides, and distinguish "none
+        # configured" from "could not be read". "0 found" on its own reads like a Cloud
+        # Connect deployment with nothing in it, which invites the reader to doubt a
+        # finding that is in fact correct.
         $tenants  = @()
         $gateways = @()
-        try { if (Test-PrecheckCmdlet 'Get-VBRCloudTenant')  { $tenants  = @(Get-VBRCloudTenant  -ErrorAction SilentlyContinue) } } catch { }
-        try { if (Test-PrecheckCmdlet 'Get-VBRCloudGateway') { $gateways = @(Get-VBRCloudGateway -ErrorAction SilentlyContinue) } } catch { }
+        $readTenants  = $false
+        $readGateways = $false
+        try { if (Test-PrecheckCmdlet 'Get-VBRCloudTenant')  { $tenants  = @(Get-VBRCloudTenant  -ErrorAction Stop); $readTenants  = $true } } catch { }
+        try { if (Test-PrecheckCmdlet 'Get-VBRCloudGateway') { $gateways = @(Get-VBRCloudGateway -ErrorAction Stop); $readGateways = $true } } catch { }
 
-        $ev = @("License CloudConnect mode: $ccMode") +
+        $configured =
+            if (-not $readTenants -and -not $readGateways) {
+                'Its tenants and gateways could not be read, which does not affect this result: the licence is what determines it.'
+            }
+            elseif ($tenants.Count -eq 0 -and $gateways.Count -eq 0) {
+                'No tenants or gateways are configured on it. That does not change the result: the license file itself prevents migration, whether or not any Cloud Connect architecture has been built.'
+            }
+            else {
+                "$($tenants.Count) tenant(s) and $($gateways.Count) gateway(s) are configured."
+            }
+
+        $ev = @("License CloudConnect mode: $ccMode",
+                "Tenants: $(if ($readTenants) { $tenants.Count } else { 'could not be read' })",
+                "Gateways: $(if ($readGateways) { $gateways.Count } else { 'could not be read' })") +
               @($tenants  | ForEach-Object { "Tenant: $($_.Name)" }) +
               @($gateways | ForEach-Object { "Gateway: $($_.Name)" })
 
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Blocker `
-            -Detail "This is a Veeam Cloud Connect deployment - the installed license reports CloudConnect = $ccMode ($($tenants.Count) tenant(s), $($gateways.Count) gateway(s) found). Cloud Connect deployments cannot be migrated to the Veeam Software Appliance." `
+            -Detail "This server is Cloud Connect licensed - the installed license reports CloudConnect = $ccMode. $configured Cloud Connect deployments cannot be migrated to the Veeam Software Appliance." `
             -Recommendation 'Cloud Connect deployments are not migratable. Do not proceed via this process.' `
             -Evidence $ev
     }

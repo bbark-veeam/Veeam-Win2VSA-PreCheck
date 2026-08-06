@@ -31,6 +31,33 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.5.1] - 2026-08-06
+### Changed
+- **DEP-001 now states that the licence file alone is what blocks the migration**, because
+  an operator with no Cloud Connect architecture will otherwise reasonably doubt a correct
+  finding. Previously it reported "(0 tenant(s), 0 gateway(s) found)", which reads like a
+  Cloud Connect deployment with nothing in it. It now says: *"No tenants or gateways are
+  configured on it. That does not change the result: the license file itself prevents
+  migration, whether or not any Cloud Connect architecture has been built."*
+- **The evidence distinguishes "could not be read" from zero.** The tenant and gateway
+  enumerations were swallowed by a `catch`, so an unreadable result was presented as an
+  empty one — the same ambiguity fixed elsewhere in 0.4.2 and 0.4.4.
+
+### Added
+- **Tests pinning that the Blocker does not depend on Cloud Connect architecture existing.**
+  This exact licence has blocked a real migration on a server with no tenants, no gateways
+  and no repositories, so requiring evidence of use before blocking would have missed it —
+  a false clean result on a Blocker-grade check. The design was questioned on the strength
+  of a report showing `Enterprise` with zero of both, and measurement settled it the other
+  way: on one server, six consecutive runs of an EnterprisePlus subscription reported
+  `CloudConnect = Disabled`, and installing a Cloud Connect licence on that same server —
+  same type, same edition — flipped it to `Enterprise`. The property is not an artefact of
+  the licence edition. Four mutations, all caught, including the "require architecture
+  first" simplification.
+- **DEP-001 is now validated live in both directions** (`Disabled` → `Pass`, `Enterprise` →
+  `Blocker`), and the reference records the before/after measurement so the design is not
+  relitigated from the same misreading.
+
 ## [0.5.0] - 2026-08-05
 ### Changed
 - **STG-003 now decides whether this server is actually affected instead of warning

@@ -742,8 +742,34 @@ Describe 'DEP-001 Cloud Connect' {
         $global:MockCloudGateways = @([pscustomobject]@{ Name = 'cc-gw-01' })
         $r = Invoke-Check 'Test-CloudConnect'
         $r.Status | Should -Be 'Blocker'
-        $r.Detail | Should -Match '2 tenant\(s\), 1 gateway\(s\)'
+        $r.Detail | Should -Match '2 tenant\(s\) and 1 gateway\(s\) are configured'
         ($r.Evidence -join ';') | Should -Match 'tenant-a'
+    }
+
+    # ⚠️ THE LICENCE FILE ITSELF IS THE BLOCKER. Confirmed the hard way: this exact
+    # licence has blocked a real migration on a server with NO Cloud Connect
+    # architecture - no tenants, no gateways, no repositories. Making the Blocker
+    # conditional on finding any of that would have missed it, which would be a false
+    # clean result on the highest-severity check in the tool. This test exists to stop
+    # exactly that "simplification".
+    It 'still blocks when the licence says Cloud Connect but nothing is configured' {
+        $global:MockLicense = [pscustomobject]@{ Type = 'Subscription'; CloudConnect = 'Enterprise' }
+        $r = Invoke-Check 'Test-CloudConnect'
+        $r.Status | Should -Be 'Blocker'
+        $r.Status | Should -Not -Be 'Pass'
+        # And it says so, because an operator with no Cloud Connect will otherwise
+        # reasonably doubt the finding.
+        $r.Detail | Should -Match 'license file itself prevents migration'
+        ($r.Evidence -join ';') | Should -Match 'Tenants: 0'
+    }
+
+    It 'distinguishes tenants that could not be read from none being configured' {
+        $global:MockLicense = [pscustomobject]@{ Type = 'Perpetual'; CloudConnect = 'Enabled' }
+        $global:MockThrow = @('Get-VBRCloudTenant', 'Get-VBRCloudGateway')
+        $r = Invoke-Check 'Test-CloudConnect'
+        $r.Status | Should -Be 'Blocker'
+        ($r.Evidence -join ';') | Should -Match 'could not be read'
+        ($r.Evidence -join ';') | Should -Not -Match 'Tenants: 0'
     }
 
     It 'blocks on the Enterprise mode as well' {

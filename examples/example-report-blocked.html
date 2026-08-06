@@ -37,8 +37,8 @@
   <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
   <div class="meta">Server: BACKUP02.corp.local &nbsp;|&nbsp;
     Build: Veeam Backup &amp; Replication 13.1.0.411 &nbsp;|&nbsp;
-    Generated: 2026-08-05 16:43:06 -04:00 &nbsp;|&nbsp;
-    Precheck version: 0.5.0 &nbsp;|&nbsp;
+    Generated: 2026-08-06 09:46:07 -04:00 &nbsp;|&nbsp;
+    Precheck version: 0.5.1 &nbsp;|&nbsp;
     Reference: KB4800 (captured 2026-07-24)</div>
 </header>
 <div class="wrap">
@@ -53,9 +53,9 @@
   <td class="mono">DEP-001</td>
   <td>
     <div class="title">Cloud Connect deployment</div>
-    <div class="detail">This is a Veeam Cloud Connect deployment - the installed license reports CloudConnect = Enabled (2 tenant(s), 1 gateway(s) found). Cloud Connect deployments cannot be migrated to the Veeam Software Appliance.</div>
+    <div class="detail">This server is Cloud Connect licensed - the installed license reports CloudConnect = Enabled. 2 tenant(s) and 1 gateway(s) are configured. Cloud Connect deployments cannot be migrated to the Veeam Software Appliance.</div>
     <div class='rec'>&#8594; Cloud Connect deployments are not migratable. Do not proceed via this process.</div>
-    <ul class='ev'><li>License CloudConnect mode: Enabled</li><li>Tenant: tenant-a</li><li>Tenant: tenant-b</li><li>Gateway: cc-gateway-01</li></ul>
+    <ul class='ev'><li>License CloudConnect mode: Enabled</li><li>Tenants: 2</li><li>Gateways: 1</li><li>Tenant: tenant-a</li><li>Tenant: tenant-b</li><li>Gateway: cc-gateway-01</li></ul>
   </td>
   <td class="cat">Deployment</td>
 </tr>

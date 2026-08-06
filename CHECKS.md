@@ -15,7 +15,7 @@ against a real environment (see the caveat at the bottom).
 |----|----------|--------------------|-------------------|-----------------|------------|
 | ENV-001 | Environment | Source must be on the **13.0.x** train; **13.1 cannot migrate**. Builds newer than 13.1 return `Manual` — the check makes no claim about releases that have not shipped | `Get-VBRBackupServerInfo` / registry / core DLL | Pass / Action / Blocker / Manual / Info | High — validated live in both directions (13.1 → Blocker, 13.0.2 → Pass) |
 | ENV-002 | Environment | VSA supports only instance-based VUL; socket must convert | `Get-VBRInstalledLicense` | Pass / Action / Info | High — instance path validated live; socket path shape-confirmed by reflection, values synthetic (socket licensing is deprecated, so a socket licence cannot be obtained to test) |
-| DEP-001 | Deployment | Cloud Connect deployments cannot migrate. Read from the licence itself (`.CloudConnect` = Enabled/Disabled/Enterprise/Invalid); tenants and gateways enrich the evidence | `Get-VBRInstalledLicense`, `Get-VBRCloudTenant`, `Get-VBRCloudGateway` | Pass / Blocker / Info | High — Disabled path validated live; the Cloud Connect modes are mock-tested pending a provider licence |
+| DEP-001 | Deployment | Cloud Connect deployments cannot migrate. Read from the licence itself (`.CloudConnect` = Enabled/Disabled/Enterprise/Invalid); tenants and gateways enrich the evidence | `Get-VBRInstalledLicense`, `Get-VBRCloudTenant`, `Get-VBRCloudGateway` | Pass / Blocker / Info | High — validated live in both directions (Disabled → Pass, Enterprise → Blocker) |
 | DEP-002 | Deployment | Google Cloud plug-in config will not migrate (Windows-only). Detected from CONFIGURATION (`Get-VBRGoogleCloudAccount`, `Get-VBRGoogleCloudComputeAccount`) plus a job-name signal. The plug-in ships with VBR so installation proves nothing; external repositories are not examined | `Get-VBRGoogleCloud*Account`, `Get-VBRJob` | Pass / Warning / Manual | Medium |
 | DEP-003 | Deployment | Entra ID tenant backup **data** not migrated | `Get-VBREntraIDTenant` | Pass / Manual / Info | Medium — mock-tested |
 | AGT-001 | Agents | All agents must be v13+ to connect | `Get-VBRDiscoveredComputer` | Pass / Action / Manual | High — validated |
@@ -94,6 +94,33 @@ v13, #7 local repo accounts are already enforced as limitation checks above.)
 | ACTION REQUIRED | any Action, no Blocker | 1 |
 | REVIEW WARNINGS | only Warning/Manual/Info | 0 |
 | READY | all Pass/Skipped | 0 |
+
+## Note on DEP-001 — the licence file is the blocker, not the architecture
+
+**Do not make this conditional on finding tenants, gateways or repositories.** Their
+absence proves nothing. This exact licence has blocked a real migration on a server with
+**no Cloud Connect architecture at all** — no tenants, no gateways, no repositories.
+Requiring evidence of use before blocking would have missed it, and that would be a false
+clean result on the only Blocker-grade check of its kind.
+
+The design was questioned once on the strength of a report showing `CloudConnect =
+Enterprise` with zero tenants and zero gateways, which looked like a licence entitlement
+being mistaken for a deployment. Measurement settled it the other way:
+
+| | Before the Cloud Connect licence | After |
+|---|---|---|
+| Licence type / edition | Subscription / EnterprisePlus | Subscription / EnterprisePlus |
+| `CloudConnect` | `Disabled` (six consecutive runs) | `Enterprise` |
+| DEP-001 | `Pass` | `Blocker` |
+
+Same server, same licence type and edition. The property is therefore **not** an artefact
+of the licence edition — it changed only because a Cloud Connect licence was installed.
+
+Because an operator with no Cloud Connect architecture will reasonably doubt the finding,
+the report says so explicitly: *"No tenants or gateways are configured on it. That does not
+change the result: the license file itself prevents migration, whether or not any Cloud
+Connect architecture has been built."* The evidence also distinguishes **"could not be
+read"** from **zero**, so an unreadable enumeration is never presented as an empty one.
 
 ## Note on PRE-003 — the consideration is narrower than the check can currently see
 
