@@ -31,6 +31,30 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.5.3] - 2026-08-06
+### Fixed
+- **Reverted the PowerShell 7.6 requirement introduced in 0.5.2, which was wrong and would
+  have refused to run on the servers this tool exists for.** 0.5.2 generalised from a
+  single machine that could not load the Veeam module below 7.6. The control contradicts
+  it: a **13.0.2** server's module loads on **PowerShell 7.4.14**, and the machine that
+  demanded 7.6 was running **13.1**. The migration candidates are 13.0.x, so
+  `#Requires -Version 7.6` would have blocked the precheck on exactly those servers —
+  a worse failure than the misleading error it was meant to fix.
+- The floor is 7.0 again. The module's minimum is **the module's**, it **varies by VBR
+  version**, and it is not this tool's to assert.
+
+### Changed
+- **What was worth keeping from 0.5.2 is the error, not the requirement.** A failed import
+  used to be reported as "run this on a machine with the VBR console installed", which
+  reads as *Veeam is missing* when the real cause may be the PowerShell version. It now
+  surfaces the module's own message — which already names the version it needs — and says
+  that minimum comes from the module and varies by build.
+- The README gives the measured figures rather than a rule: 13.0.2 loads on 7.4, 13.1
+  refuses below 7.6, and since you are prechecking 13.0.x servers, 7.4 is normally fine.
+  It also explains why the follow-on `Connect-VBRServer` error compounds the confusion.
+- `psVersion` stays in the report. It was the sound half of 0.5.2: with the module's floor
+  varying by build, the host's PowerShell version is a fact about the run worth recording.
+
 ## [0.5.2] - 2026-08-06
 ### Fixed
 - **The stated PowerShell prerequisite was wrong, and it would have failed customers.** The

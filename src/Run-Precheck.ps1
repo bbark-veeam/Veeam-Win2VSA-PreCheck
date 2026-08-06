@@ -1,4 +1,4 @@
-#Requires -Version 7.6
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Runs the Windows VBR -> Veeam Software Appliance migration precheck (KB4800).

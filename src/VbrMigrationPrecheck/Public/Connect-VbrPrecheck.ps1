@@ -7,12 +7,13 @@
 #  * Runs best ON the VBR server itself (default -Server localhost) - the richest
 #    and most reliable place to read configuration. Remote works too if the
 #    console/module is installed locally and the account can authenticate.
-#  * v13's module requires PowerShell **7.6** - its own manifest sets that minimum
-#    and the import fails outright below it. Checking only the major version let
-#    7.4 through, and the resulting error names the MODULE, which reads as "Veeam
-#    is not installed" when the real cause is the PowerShell version. Worse, once
-#    the import fails Connect-VBRServer does not exist either, so the next error
-#    compounds the misdirection. Fail fast, and say which it is.
+#  * The module sets its own PowerShell minimum and IT VARIES BY VBR BUILD -
+#    measured: a 13.0.2 module loads on 7.4.14, a 13.1 module refuses below 7.6.
+#    So this tool keeps a 7.0 floor (5.1 / ISE cannot load it at all) and lets the
+#    module speak for itself. Its error already names the version it needs; the job
+#    here is to surface that rather than replace it with "Veeam is not installed",
+#    which is what it used to say. Note the import failing also means
+#    Connect-VBRServer does not exist, so the follow-on error compounds it.
 #  * Connect-VBRServer against a Windows VBR uses the classic path (no port
 #    switch needed). This tool targets the WINDOWS source server, NOT the VSA
 #    appliance - do not point it at a v13 appliance (that would need :443 Identity
@@ -25,9 +26,8 @@ function Connect-VbrPrecheck {
         [PSCredential] $Credential
     )
 
-    $minPowerShell = [version] '7.6'
-    if ($PSVersionTable.PSVersion -lt $minPowerShell) {
-        throw "PowerShell $minPowerShell or later is required: the Veeam v13 module refuses to load under $($PSVersionTable.PSVersion). That minimum is set by the Veeam module itself, not by this tool. Upgrade PowerShell, then run this from 'pwsh' - not Windows PowerShell or ISE."
+    if ($PSVersionTable.PSVersion.Major -lt 7) {
+        throw "PowerShell 7.0+ is required (Veeam.Backup.PowerShell will not load under $($PSVersionTable.PSVersion)). Run this from 'pwsh', not Windows PowerShell / ISE."
     }
 
     Write-PrecheckLog "Importing Veeam.Backup.PowerShell module..." -Level STEP
@@ -35,7 +35,7 @@ function Connect-VbrPrecheck {
         Import-Module Veeam.Backup.PowerShell -DisableNameChecking -ErrorAction Stop -Verbose:$false
     }
     catch {
-        throw "Could not import Veeam.Backup.PowerShell while running PowerShell $($PSVersionTable.PSVersion). Run this on a machine with the VBR v13 console/module installed, on PowerShell $minPowerShell or later. Original error: $($_.Exception.Message)"
+        throw "Could not import Veeam.Backup.PowerShell while running PowerShell $($PSVersionTable.PSVersion). Run this on a machine with the VBR v13 console/module installed. If the error below names a required PowerShell version, that minimum comes from the Veeam module and varies by VBR build - upgrade PowerShell to what it asks for. Original error: $($_.Exception.Message)"
     }
 
     # Reuse an existing session if there is one. The Veeam PowerShell Toolkit opens

@@ -33,11 +33,14 @@ Or download it from the [latest release](../../releases/latest).
 
 ## Requirements
 
-- **PowerShell 7.6 or later.** This is not our requirement - the Veeam PowerShell module
-  for v13 refuses to load below it, with *"The version of PowerShell on this computer is
-  '7.4.x'. The module ... requires a minimum PowerShell version of '7.6' to run."* When that
-  import fails, `Connect-VBRServer` does not exist either, so the failure can look like a
-  missing Veeam installation. Check with `$PSVersionTable.PSVersion` before running.
+- **PowerShell 7.0 or later.** The Veeam module also sets its own minimum on top of that,
+  and it **varies by VBR version**: a **13.0.2** server's module loads on **7.4**, while a
+  **13.1** server's module refuses below **7.6** — *"The module … requires a minimum
+  PowerShell version of '7.6' to run."* Since the servers you are prechecking are 13.0.x,
+  7.4 is normally fine. If you do see that error, upgrade PowerShell to the version it
+  names; note that when the import fails `Connect-VBRServer` does not exist either, so the
+  follow-on error can look like a missing Veeam installation rather than a PowerShell
+  version problem. Check yours with `$PSVersionTable.PSVersion`.
 - Run it **on the Windows VBR server itself** (some checks read local state and will
   say so when they cannot)
 - An account that can read the VBR configuration — the same rights you would use for
