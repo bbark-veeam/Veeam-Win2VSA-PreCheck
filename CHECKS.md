@@ -95,6 +95,40 @@ v13, #7 local repo accounts are already enforced as limitation checks above.)
 | REVIEW WARNINGS | only Warning/Manual/Info | 0 |
 | READY | all Pass/Skipped | 0 |
 
+## Note on PRE-003 — the consideration is narrower than the check can currently see
+
+KB4800's consideration is about the case where **the backup server itself is a source for a
+file-to-tape job**. File-to-tape is unstructured backup to tape: when the backup server is
+the source, it is being treated much like a Windows file server to read files from, which
+is why the original server's **short hostname** must be used when selecting the source
+during migration, and why it has to be resolvable from the appliance.
+
+That is a different thing from backup-to-tape, which identifies backup files natively
+within a repository and sends those to tape. Backup-to-tape is not affected.
+
+**Two limitations follow, and both are honest gaps rather than defects:**
+
+1. **The job-type vocabulary is unconfirmed.** `VBRTapeJob`'s shape has never been
+   captured — no lab has had tape jobs — so the check identifies file-to-tape by matching
+   the substring `File` across the job's type strings. At least three tape job kinds exist
+   (`BackupToTape`, `FileToTape`, `ObjectToTape`, plus a legacy `TapeFilesJob`), and since
+   backup-to-tape operates on backup *files*, a type string such as "Backup files to tape"
+   would be matched and misreported. **No collision has been demonstrated** — but none has
+   been ruled out either, and this is the same shape as the AGT-003 `Mac`/"machine"
+   defect. Treat the detection as unvalidated.
+
+2. **Whether the backup server is actually the source is not read.** The check reports any
+   file-to-tape job and hedges — "*if* this backup server is their source". A server whose
+   file-to-tape jobs all source from other file servers gets a next step that does not
+   apply to it.
+
+**If a tape environment ever becomes available, capture:** the real `Type`/`TypeToString`
+values (so the match can become an exact comparison, or move to the job object's .NET type
+name), whether `Get-VBRTapeJob` offers a server-side type filter, and how a job exposes its
+**source objects** — the last would let the check state that this server *is* a source
+rather than asking the operator to check, removing the hedge entirely. That is the same
+improvement STG-003 got by reading `FipsCompliantModeEnabled` instead of deferring.
+
 ## Note on STG-003 — the FIPS restriction is version-dependent, and about the *Linux* server
 
 Verbatim, from the Veeam User Guide → *HPE Alletra 5000, 6000, Nimble* limitations

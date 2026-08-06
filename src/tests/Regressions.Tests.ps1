@@ -1186,9 +1186,18 @@ Describe 'PRE-003 file-to-tape source hostname' {
         $r.Recommendation | Should -Match 'BACKUP01'
     }
 
-    # Same bare-substring hazard as the AGT-003 'Mac' bug, which matched the word
-    # "machine": this matches 'File' across the type strings, so a backup-to-tape job
-    # whose type mentions a file must not be reported as file-to-tape.
+    # ⚠️ WEAKER THAN IT LOOKS - read before trusting it. The check matches 'File' as a
+    # bare substring across the type strings, which is the same PATTERN as the AGT-003
+    # 'Mac'/"machine" defect. But unlike AGT-003, no collision has been demonstrated:
+    # VBRTapeJob's shape has never been captured (the lab has no tape jobs), so the values
+    # below are INVENTED and the negative case proves only that these particular strings
+    # do not collide.
+    #
+    # A collision is plausible: at least three tape job kinds exist (BackupToTape,
+    # FileToTape, ObjectToTape, plus a legacy TapeFilesJob), and backup-to-tape works on
+    # backup FILES - a TypeToString such as "Backup files to tape" would match 'File' and
+    # be reported as file-to-tape. Capture the real Type/TypeToString values if a tape
+    # environment ever becomes available, and tighten this to an exact comparison.
     It 'does not treat a backup-to-tape job as file-to-tape' {
         $global:MockTapeJobs = @([pscustomobject]@{ Name = 'VM backup to tape'; Type = 'BackupToTape'; TypeToString = 'Backup to tape' })
         (Invoke-Check 'Test-PreFileToTapeHostname').Status | Should -Be 'Skipped'
