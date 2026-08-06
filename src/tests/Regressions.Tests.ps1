@@ -36,6 +36,7 @@ BeforeAll {
     $global:MockHistory     = $null
     $global:MockSecurityOptions = $null
     $global:MockServers     = @()
+    $global:MockRegistry    = @{}
     $global:MockTapeJobs    = @()
     $global:MockCloudTenants  = @()
     $global:MockCloudGateways = @()
@@ -90,6 +91,11 @@ BeforeAll {
             [pscustomobject]@{ PermissionType = 'OnlySelectedUsers'; Users = $global:MockPerms[$key] }
         }
     }
+    function global:Get-ItemProperty {
+        param([string] $Path, $ErrorAction)
+        if ($global:MockRegistry.ContainsKey($Path)) { return $global:MockRegistry[$Path] }
+        throw "Cannot find path '$Path' because it does not exist."
+    }
     function global:Get-CimInstance {
         param($ClassName, $ErrorAction)
         [pscustomobject]@{ PartOfDomain = $true; Domain = 'corp.local' }
@@ -113,7 +119,7 @@ BeforeAll {
         $global:MockPluginHosts = @(); $global:MockNimble = @(); $global:MockCreds = @()
         $global:MockThrow = @()
         $global:MockLicense = $null; $global:MockHistory = $null; $global:MockSecurityOptions = $null
-        $global:MockServers = @(); $global:MockTapeJobs = @()
+        $global:MockServers = @(); $global:MockTapeJobs = @(); $global:MockRegistry = @{}
         $global:MockCloudTenants = @(); $global:MockCloudGateways = @()
     }
 
@@ -1358,5 +1364,71 @@ Describe 'READY is unreachable on a real server' {
         $v.Label    | Should -Be 'REVIEW WARNINGS'
         $v.Label    | Should -Not -Be 'READY'
         $v.ExitCode | Should -Be 0
+    }
+}
+
+Describe 'DB-001 configuration database scoping' {
+    # Set here, not in the Describe body: Pester 6 does not make Describe-scope
+    # variables or functions visible inside It blocks - only BeforeAll/BeforeEach share
+    # scope with them. (Third time this has bitten in this file.)
+    BeforeEach {
+        Reset-MockState
+        $global:MockHistory = [pscustomobject]@{ KeepAllSessions = $false; RetentionLimitWeeks = 13 }
+        $dbcPath = 'HKLM:\SOFTWARE\Veeam\Veeam Backup and Replication\DatabaseConfigurations'
+    }
+
+    # KB4800 scopes the failure to a configuration database hosted on Microsoft SQL, so
+    # on PostgreSQL there is nothing the retention window could be hiding.
+    # The registry shape here mirrors a real PostgreSQL server exactly, INCLUDING the
+    # populated MsSql branch that sits alongside it. That is deliberate and load-bearing:
+    # with only the active marker mocked, code that wrongly infers the engine from the
+    # MsSql subkey would still produce the right answer here and the trap below would go
+    # undetected. This is the one case where the correct and the buggy readings diverge.
+    It 'passes outright when the configuration database is PostgreSQL' {
+        $global:MockRegistry = @{
+            $dbcPath          = [pscustomobject]@{ SqlActiveConfiguration = 'PostgreSql' }
+            "$dbcPath\MsSql" = [pscustomobject]@{ SqlDatabaseName = 'VeeamBackup'; SqlServerName = 'localhost'; SqlInstanceName = '' }
+            "$dbcPath\PostgreSql" = [pscustomobject]@{ SqlDatabaseName = 'VeeamBackup'; SqlHostName = 'localhost'; SqlHostPort = 5432 }
+        }
+        $r = Invoke-DbCheck -UpgradeDate (Get-Date).AddDays(-49)   # would otherwise be Action
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'configuration database on this server is PostgreSQL'
+        ($r.Evidence -join ';') | Should -Match 'PostgreSql'
+    }
+
+    # ⚠️ THE TRAP: both subkeys exist, and on a PostgreSQL server the MsSql branch still
+    # carries populated SqlDatabaseName and SqlServerName values. Inferring the engine
+    # from the subkey would report Microsoft SQL on a PostgreSQL deployment. Only
+    # SqlActiveConfiguration discriminates.
+    It 'reports Microsoft SQL only from the active marker, not a populated MsSql subkey' {
+        $global:MockRegistry = @{
+            $dbcPath = [pscustomobject]@{ SqlActiveConfiguration = 'MsSql' }
+            "$dbcPath\MsSql" = [pscustomobject]@{ SqlDatabaseName = 'VeeamBackup'; SqlServerName = 'localhost' }
+        }
+        $r = Invoke-DbCheck -UpgradeDate (Get-Date).AddDays(-49)
+        $r.Status | Should -Be 'Action'
+        $r.Status | Should -Not -Be 'Pass'
+    }
+
+    # Only a positive PostgreSQL reading narrows the check. Everything else keeps the
+    # full logic, so an unreadable registry costs a deferral rather than a missed failure.
+    It 'keeps the full check when the registry cannot be read' {
+        $global:MockRegistry = @{}
+        (Invoke-DbCheck -UpgradeDate (Get-Date).AddDays(-49)).Status | Should -Be 'Action'
+    }
+
+    It 'keeps the full check on an unrecognised engine value' {
+        $global:MockRegistry = @{ $dbcPath = [pscustomobject]@{ SqlActiveConfiguration = 'SomethingElse' } }
+        (Invoke-DbCheck -UpgradeDate (Get-Date).AddDays(-49)).Status | Should -Be 'Action'
+    }
+
+    It 'keeps the full check when the marker is absent from the key' {
+        $global:MockRegistry = @{ $dbcPath = [pscustomobject]@{ SomeOtherValue = 1 } }
+        (Invoke-DbCheck -UpgradeDate (Get-Date).AddDays(-49)).Status | Should -Be 'Action'
+    }
+
+    It 'scopes out PostgreSQL even with no upgrade date supplied' {
+        $global:MockRegistry = @{ $dbcPath = [pscustomobject]@{ SqlActiveConfiguration = 'PostgreSql' } }
+        (Invoke-DbCheck -UpgradeDate $null).Status | Should -Be 'Pass'
     }
 }

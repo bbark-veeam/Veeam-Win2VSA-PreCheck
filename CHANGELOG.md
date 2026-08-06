@@ -31,6 +31,33 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.6.0] - 2026-08-06
+### Added
+- **DB-001 now reads the configuration database engine, and passes outright on PostgreSQL.**
+  KB4800 scopes this failure to a deployment *"whose database is hosted on Microsoft SQL"*,
+  so on PostgreSQL it cannot apply — yet the check was still asking operators to compare a
+  retention window against a v12 upgrade date that could never produce a finding. Since
+  PostgreSQL became the default at v12 install, that is a deferral on a large share of the
+  fleet, removed. The engine comes from the registry value `SqlActiveConfiguration` under
+  `DatabaseConfigurations`.
+- **Two ways of reading it wrong are pinned by tests, because both look convincing on a
+  real server.** Neither is hypothetical — both were found while probing an actual VBR:
+  - The `MsSql` and `PostgreSql` subkeys **both exist**, and on a PostgreSQL server the
+    `MsSql` branch still carries populated `SqlDatabaseName` and `SqlServerName` values.
+    Inferring the engine from the subkey reports Microsoft SQL on a PostgreSQL deployment.
+  - The `EntraIdSql*` values in the parent key look like the answer —
+    `postgresql-x64-17`, port `5432` — but they describe the **Entra ID backup database**.
+    Using them would clear a server whose configuration database is Microsoft SQL while its
+    Entra ID backups run on PostgreSQL, turning a real migration-failure cause into a Pass.
+- Six cases, four mutations, all caught. The PostgreSQL case mocks the **full real registry
+  shape**, populated `MsSql` branch included, since that is the only arrangement where a
+  correct reading and the subkey-inference bug give different answers.
+
+### Changed
+- Minor rather than patch: reading a new source to scope a check is new capability.
+- `Get-VBRBackupServerInfo` was checked as the supported route first. It returns only
+  `Name`, `Build` and `PatchLevel`, so the registry is the available source.
+
 ## [0.5.4] - 2026-08-06
 ### Fixed
 - A code comment added in 0.5.2 still asserted that "the Veeam v13 module requires

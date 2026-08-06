@@ -22,6 +22,36 @@ function Test-SessionHistoryAge {
     $id = 'DB-001'; $cat = 'Job history'
     $title = 'Session-history retention'
 
+    # KB4800 scopes this failure to a deployment "whose database is hosted on Microsoft
+    # SQL". On PostgreSQL it cannot apply at all, so asking the operator to compare
+    # retention against an upgrade date would be work with no possible finding behind it.
+    #
+    # The authoritative value is SqlActiveConfiguration, under DatabaseConfigurations.
+    # ⚠️ Do NOT infer the engine from the MsSql / PostgreSql subkeys. BOTH exist, and on a
+    # PostgreSQL server the MsSql branch still carries populated SqlDatabaseName and
+    # SqlServerName values - reading those would report Microsoft SQL on a PostgreSQL
+    # deployment. Only the active marker discriminates.
+    #
+    # Note also that the EntraIdSql* values in the parent key describe the Entra ID backup
+    # database, NOT this one; keying on those would read the wrong database entirely.
+    #
+    # Only a positive PostgreSQL reading narrows the check. Anything else - Microsoft SQL,
+    # an unreadable registry, a value we do not recognise - falls through to the full
+    # logic below, so being wrong here costs a deferral rather than a missed failure.
+    $activeDb = $null
+    try {
+        $dbc = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Veeam\Veeam Backup and Replication\DatabaseConfigurations' -ErrorAction Stop
+        if ($dbc -and $dbc.PSObject.Properties['SqlActiveConfiguration']) {
+            $activeDb = [string]$dbc.SqlActiveConfiguration
+        }
+    } catch { }
+
+    if ($activeDb -ieq 'PostgreSql') {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
+            -Detail 'The configuration database on this server is PostgreSQL. This limitation applies only to deployments whose configuration database is hosted on Microsoft SQL, so job history predating the upgrade to v12 cannot affect this migration.' `
+            -Evidence @("Configuration database: $activeDb")
+    }
+
     if (-not (Test-PrecheckCmdlet 'Get-VBRHistoryOptions')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
             -Detail 'Session-history retention could not be read on this server.' `

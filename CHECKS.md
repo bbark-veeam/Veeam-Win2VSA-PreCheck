@@ -33,7 +33,7 @@ against a real environment (see the caveat at the bottom).
 | SEC-003 | Security | Trusted-domain authentication unsupported | (manual) | Manual | n/a — permanently manual; a test pins it so it cannot become a Pass |
 | SEC-004 | Security | Local (non-domain) repo access accounts → "SID not found" | `Get-VBREPPermission` -Repository → `.Users` | Pass / Action / Manual / Info | High — validated, both the flagging and the clean path |
 | SEC-005 | Security | Console role assignments must be UPN (appliance console login) — see note | `Get-VBRUserRoleAssignment` | Pass / Action / Manual | High — validated live: all three source shapes flagged with distinct reasons, and both appliance remediation forms confirmed on real appliances |
-| DB-001 | Job history | Job-history sessions predating the **upgrade to v12** fail migration (the limiting factor is v11-and-earlier session data) | `Get-VBRHistoryOptions` | Pass / Action / Manual / Info | High — Pass and Action both validated live |
+| DB-001 | Job history | Job-history sessions predating the **upgrade to v12** fail migration (the limiting factor is v11-and-earlier session data). **Scoped to a Microsoft SQL configuration database** — see note | `Get-VBRHistoryOptions`, registry `DatabaseConfigurations` | Pass / Action / Manual / Info | High — Pass and Action validated live; the PostgreSQL scoping is shape-confirmed on a real server |
 
 ### Pre-Migration Considerations (KB4800) → `NextStep`
 
@@ -94,6 +94,39 @@ v13, #7 local repo accounts are already enforced as limitation checks above.)
 | ACTION REQUIRED | any Action, no Blocker | 1 |
 | REVIEW WARNINGS | only Warning/Manual/Info | 0 |
 | READY | all Pass/Skipped | 0 |
+
+## Note on DB-001 — the failure is scoped to a Microsoft SQL configuration database
+
+KB4800, verbatim: *"If the Windows-based Veeam Backup & Replication deployment, **whose
+database is hosted on Microsoft SQL**, was at any time in the past upgraded from a version
+older than v12, and there are still job history sessions in the database from prior to
+that upgrade, the migration to Veeam Software Appliance will fail."*
+
+So on a **PostgreSQL** configuration database the limitation cannot apply, and DB-001
+returns `Pass` outright rather than asking the operator to compare a retention window
+against an upgrade date that could never produce a finding. PostgreSQL became available in
+v11 (by manual migration) and the default at v12 install, so this is common.
+
+The engine is read from the registry:
+`HKLM\SOFTWARE\Veeam\Veeam Backup and Replication\DatabaseConfigurations` →
+**`SqlActiveConfiguration`**.
+
+**⚠️ Two ways to read this wrong, both observed on a real server:**
+
+1. **Do not infer the engine from the `MsSql` / `PostgreSql` subkeys.** *Both exist*, and on
+   a PostgreSQL server the `MsSql` branch still carries populated `SqlDatabaseName` and
+   `SqlServerName` values. Reading those reports Microsoft SQL on a PostgreSQL deployment.
+   Only the active marker discriminates.
+2. **Do not use the `EntraIdSql*` values** in the parent key. They look like an answer —
+   `EntraIdSqlServiceName = postgresql-x64-17`, `EntraIdSqlHostPort = 5432` — but they
+   describe the **Entra ID backup database**, a different database entirely. A server with
+   an MSSQL configuration database and Entra ID backups on PostgreSQL would be cleared by
+   mistake, turning a genuine migration-failure cause into a `Pass`.
+
+Only a positive `PostgreSql` reading narrows the check. Microsoft SQL, an unreadable
+registry, or an unrecognised value all fall through to the full logic, so being wrong here
+costs a deferral rather than a missed failure. `Get-VBRBackupServerInfo` was checked first
+and does not expose the database — it returns only `Name`, `Build` and `PatchLevel`.
 
 ## Note on DEP-001 — the licence file is the blocker, not the architecture
 
