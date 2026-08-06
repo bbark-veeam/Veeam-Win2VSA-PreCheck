@@ -368,6 +368,44 @@ command line not shown" when the two cannot be separated confidently — an unqu
 path containing spaces, or an interpreter such as `powershell.exe` where the script
 is itself an argument.
 
+## The UPN question, settled by measurement (supersedes a plain reading of KB4800)
+
+KB4800 says, verbatim: *"The Veeam Software Appliance exclusively uses Kerberos for handling
+domain credentials. As such, all domain usernames must be formatted in UPN format
+(user@fqdn)."* Taken literally that would make `fqdn\user` a finding everywhere. **It is not,
+and SEC-002 deliberately does not flag it.** The two surfaces behave differently, and this
+was established by testing each one rather than by reading:
+
+| Surface | `user@fqdn` | `fqdn\user` | `NETBIOS\user` |
+|---|---|---|---|
+| **Console sign-in** (SEC-005) | ✅ required | ❌ rejected at the login form | ❌ rejected |
+| **Datacenter credentials**, used to reach managed servers (SEC-002) | ✅ | ✅ **works, and persists** | ❌ |
+
+Evidence for each cell:
+
+- **Sign-in rejects `fqdn\user` outright**, with *"Specify a username in the UPN format
+  (username@domain.com)."* So console access genuinely is UPN-only.
+- **Users & Roles accepts `fqdn\user` on input but Veeam itself rewrites it to UPN** —
+  a group entered as `<domain>\Domain Admins` reappears as `Domain Admins@<domain>`, and a
+  user entered as `<domain>\<user>` as `<user>@<domain>`, simply from closing and reopening
+  the dialog. So a dotted-prefix assignment is transient and SEC-005 will rarely see one;
+  its real findings are NetBIOS, BUILTIN and machine-local principals.
+- **Datacenter credentials do NOT get rewritten.** A credential stored as
+  `<domain>\administrator` is still in that form after repeated reboots and reloads, and it
+  works for connecting to managed servers. NetBIOS-prefixed does not.
+
+**Consequences, and why the two checks must stay asymmetric:**
+
+1. **SEC-002 treats a prefix containing a dot as acceptable** and flags only NetBIOS, machine
+   prefixes and bare names. Flagging `fqdn\user` would tell operators to change a credential
+   that works — needless work on every server that uses that form.
+2. **SEC-005 requires the `@` form**, because sign-in does.
+3. The code in both carries a comment saying *do not harmonise the two*. That is why.
+
+**Do not "correct" SEC-002 to match the KB sentence above.** The sentence is a fair summary of
+the principle — Kerberos, therefore UPN — but the product accepts `fqdn\user` on the
+credential surface, and the tool is deliberately more precise than the summary.
+
 ## Note on SEC-002 — why it reports rather than prescribes
 
 Credential format cannot be judged from the credential string alone, because
