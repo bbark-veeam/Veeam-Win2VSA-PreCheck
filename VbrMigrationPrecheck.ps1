@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.8.0
-#  Built   : 2026-08-06 18:28:45
+#  Version : 0.8.1
+#  Built   : 2026-08-06 18:34:17
 #  Sources : 16 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.8.0'
+$script:PrecheckVersion = '0.8.1'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -175,7 +175,7 @@ function Get-VbrProductVersion {
 # a report stays honestly bounded: the KB is a living document and its guidance can
 # change with a new release, long after a given report was produced.
 # UPDATE THIS whenever KB4800 is re-read and the checks are reconciled against it.
-$script:PrecheckKbCaptured = '2026-07-24'
+$script:PrecheckKbCaptured = '2026-08-04'
 
 $script:PrecheckStatusRank = @{
     Blocker  = 6

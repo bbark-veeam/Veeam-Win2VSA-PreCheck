@@ -21,7 +21,7 @@
 # a report stays honestly bounded: the KB is a living document and its guidance can
 # change with a new release, long after a given report was produced.
 # UPDATE THIS whenever KB4800 is re-read and the checks are reconciled against it.
-$script:PrecheckKbCaptured = '2026-07-24'
+$script:PrecheckKbCaptured = '2026-08-04'
 
 $script:PrecheckStatusRank = @{
     Blocker  = 6

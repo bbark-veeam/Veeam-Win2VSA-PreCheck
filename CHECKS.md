@@ -1,6 +1,6 @@
 # Checks Reference — KB4800 coverage map
 
-> **KB4800 as captured 2026-07-24.** It is a living document, so its guidance can
+> **KB4800 as captured 2026-08-04.** It is a living document, so its guidance can
 > change with a new release. Every report states this date, from the
 > `$script:PrecheckKbCaptured` constant in `VbrMigrationPrecheck/Private/New-PrecheckResult.ps1`
 > — update it there whenever the KB is re-read and these checks are reconciled
@@ -155,6 +155,36 @@ the report says so explicitly: *"No tenants or gateways are configured on it. Th
 change the result: the license file itself prevents migration, whether or not any Cloud
 Connect architecture has been built."* The evidence also distinguishes **"could not be
 read"** from **zero**, so an unreadable enumeration is never presented as an empty one.
+
+## Deliberately NOT checked, and why
+
+Identified in the KB4800 re-read of 2026-08-06 and consciously left out, recorded here so
+they are not repeatedly rediscovered as gaps.
+
+**Post-migration actions with no pre-migration signal.** The old Windows server becoming a
+managed server that should then be removed; default repositories being renamed with a
+"Migrated" prefix and jobs needing to be re-pointed; the Distribution Service restart;
+object-storage backups by a local account starting new chains; block-storage backups needing
+files moved to a new account directory; Azure Archive updates taking up to 24 hours;
+malware-scanning index rebuilds making the first run longer; custom-role job ownership
+transferring to the primary admin; remote Linux mount servers and repository mount settings
+needing credential updates; Cloud Connect repositories needing a Windows mount server for
+certain Explorers.
+
+**External product integrations.** Veeam ONE (remove the old server, add the appliance,
+historical data is lost), Veeam Recovery Orchestrator, Service Provider Console, and
+Enterprise Manager (update the existing entry rather than delete and recreate).
+
+**Why none of them is a check.** They are things to *do after* a migration, not conditions to
+*detect before* one, which is what this tool is for. **None is a limitation that would stop a
+migration**, so their absence does not weaken any verdict. They also arrive with the
+migration runbook rather than needing per-server detection — and with a planned end of life
+for this tool (see the roadmap), building detection for them would not repay the cost.
+
+**Where the boundary sits:** an item earns a check when it is a *condition of the source
+server* that can be read before migrating and that changes whether, or how, the migration
+should proceed. AGT-005 qualified on exactly that basis — an AD protection group's LDAP port
+is readable in advance and determines a required follow-up action.
 
 ## Note on PRE-003 — the consideration is narrower than the check can currently see
 

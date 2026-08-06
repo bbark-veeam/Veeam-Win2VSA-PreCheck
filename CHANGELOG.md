@@ -50,6 +50,22 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.8.1] - 2026-08-06
+### Changed
+- **KB4800 capture date advanced from 2026-07-24 to 2026-08-04**, the date the live page
+  now reports. Every report carries this, so it tells a reader which version of a living
+  document the checks were reconciled against. It was deliberately held back until each
+  difference from the re-read was actually resolved rather than merely noticed.
+- **What the re-read changed:** NEC Storage V Series added to STG-002 and PRE-004;
+  DB-001 scoped to a Microsoft SQL configuration database; the UPN question settled by
+  measurement with no code change; and AGT-005 added for AD protection groups on port 636.
+- **What it deliberately did not change** is now recorded in the reference, with the reason.
+  The remaining KB items are post-migration actions and external product integrations —
+  things to do *after* a migration rather than conditions to detect *before* one. None is a
+  limitation that would stop a migration, so their absence does not weaken any verdict.
+  The reference also states where the boundary sits, so the same list is not rediscovered
+  as a gap each time the KB is read.
+
 ## [0.8.0] - 2026-08-06
 ### Added
 - **AGT-005: Active Directory protection groups using port 636.** KB4800 asks for the domain
