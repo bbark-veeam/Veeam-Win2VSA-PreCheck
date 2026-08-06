@@ -230,6 +230,44 @@ migration limitations, so no check is built from them:
 - **Volume Collection replication for backup from secondary arrays** — a prerequisite of
   that feature, not something migration changes.
 
+## ⚠️ SEC-005 — Windows and the appliance normalise in OPPOSITE directions
+
+Measured on both platforms, 2026-08-06. Entering the same `fqdn\user` form into Users &
+Roles gives a different stored result depending on where you are:
+
+| Entered as | **Windows VBR** stores | **VSA appliance** stores |
+|---|---|---|
+| `<domain>\Domain Admins` | **`<NETBIOS>\Domain Admins`** | `Domain Admins@<domain>` |
+| `<domain>\administrator` | **`<NETBIOS>\Administrator`** | `Administrator@<domain>` |
+
+**Two things follow.**
+
+**1. SEC-005 fires on essentially every Windows source, by construction.** Windows VBR
+normalises domain principals to the NetBIOS form, and the appliance sign-in rejects that
+form. So a near-universal finding is the expected output, not a sign of a misconfigured
+server. Reports across a fleet should be read with that in mind.
+
+**2. Converting to UPN before migration is REQUIRED, so this is a real workstream.**
+Migration injects the database directly, so nothing converts the assignments on the way in,
+and the appliance sign-in rejects the NetBIOS form. The assignments therefore have to be in
+UPN form *on the Windows source* before the migration runs. Combined with point 1, that
+means **essentially every server in the estate needs this done** — it is a planned task per
+server, not an exception, and SEC-005 is the check that enumerates it.
+
+**OPEN — the method, not the requirement.** The console rewrites `<domain>\user` to
+NetBIOS, so the obvious route may not work. What has not been tested is whether a Windows
+VBR will **store a typed UPN** (`user@<domain>`) as entered. Until that is known:
+
+- *Console keeps a typed UPN* → the recommendation says exactly that: enter the UPN form,
+  not `fqdn\user`, which Windows silently downgrades.
+- *Console rewrites a UPN too* → the console cannot do it, and the recommendation must name
+  another route — most likely `Add-VBRUserRoleAssignment`, which may bypass the UI
+  normalisation. That needs testing before being recommended.
+
+**Do not reword the recommendation until the method is confirmed.** Telling operators to
+perform a step the console silently undoes, on every server in a 200-server estate, is worse
+than the finding itself — they would believe it was done.
+
 ## Note on SEC-005 — the required form differs for a user and a group
 
 The appliance wants an `@` form for both, but **not the same `@` form**, and handing an
