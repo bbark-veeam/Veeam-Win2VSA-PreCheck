@@ -230,6 +230,39 @@ migration limitations, so no check is built from them:
 - **Volume Collection replication for backup from secondary arrays** — a prerequisite of
   that feature, not something migration changes.
 
+## ⚠️ The appliance rejects a mixed-case name ON INPUT, then displays it mixed-case
+
+Measured directly, adding a role assignment on an appliance:
+
+Isolating one variable at a time:
+
+| Entered | Result |
+|---|---|
+| `Administrator@Contoso.local` | ❌ *"Cannot find user with the specified name"* |
+| `administrator@CONTOSO.LOCAL` | ❌ same failure — so it is not just mixed case |
+| `administrator@contoso.local` | ✅ created |
+| **`Administrator@contoso.local`** | ✅ created — so the **name's** case is irrelevant |
+| `Domain Admins@contoso.local` | ✅ created |
+
+**Any** upper case in the domain fails, in any position.
+
+**It is the domain portion, and only the domain portion.** And once created, the console
+displays the account with the domain mixed-case again — so the form shown in the UI is *not* a
+form that can be entered. Anyone building a script by copying what the console shows will have
+every line fail.
+
+This matters for the generated remediation script because `Win32_ComputerSystem.Domain` returns
+the **mixed-case** form — exactly the one that fails. The generator therefore lower-cases the
+domain and leaves the principal name untouched, since the name is its identity and its case is
+proven not to matter.
+
+**This probably also explains the "the VSA cannot resolve any domain principal" episode.** That
+investigation ruled out nine hypotheses and briefly looked like a product defect worth
+escalating; every failing attempt used the mixed-case domain, and the one principal that
+"worked" was already assigned, where no lookup happens. A reboot appearing to fix it, and the
+failure then recurring, fits a casing difference between attempts better than transient state.
+Treat that section as superseded by this one.
+
 ## ⚠️ SEC-005 — Windows and the appliance normalise in OPPOSITE directions
 
 Measured on both platforms, 2026-08-06. Entering the same `fqdn\user` form into Users &

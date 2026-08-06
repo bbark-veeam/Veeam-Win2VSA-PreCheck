@@ -50,6 +50,36 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.7.1] - 2026-08-06
+### Fixed
+- **Every user line the 0.7.0 generator produced would have failed.** Running it against a
+  real appliance found that **the domain portion of the name must be lower-case on input**:
+  `Administrator@Contoso.local` returns *"Cannot find user with the specified name"*, while
+  `Administrator@contoso.local` is accepted. Isolating one variable at a time showed the
+  **name's** case is irrelevant and the **domain's** is not. The generator built the domain
+  from `Win32_ComputerSystem.Domain`, which returns exactly the mixed-case form that fails,
+  so it now lower-cases the domain and leaves the principal name untouched — including in
+  the commented templates, so uncommenting one does not hand back the broken form.
+- **The console actively misleads here.** Once an account is added, it is displayed with the
+  domain mixed-case again — so the value shown in the UI is not a value that can be entered.
+  Anyone scripting this by copying what the console shows will have every line fail. The
+  generated script says so, and says not to "tidy" the casing.
+- Groups and users are handled by one rule again. 0.7.0 split them on a theory that the
+  failure was a missing or mismatched `userPrincipalName`; the cause was casing, so that
+  explanation was removed rather than left in place describing the wrong thing.
+
+### Added
+- Tests for the casing rule, asserted with `.Contains()` rather than `Should -Match`.
+  **`Should -Match` is case-insensitive**, so a casing assertion written with it passes
+  whatever the code does — a test that cannot fail, which is exactly what this suite exists
+  to prevent. Mutation-checked by reverting the lower-casing.
+
+### Validated
+- The generated script now runs end to end on a real appliance: both a group and a user
+  assignment were created from it. `Add-VBRUserRoleAssignment -Name <principal>@<domain>
+  -Role BackupAdmin` is confirmed, along with the `BackupAdmin` enum and the `group@domain`
+  form — none of which had been executed when 0.7.0 shipped.
+
 ## [0.7.0] - 2026-08-06
 ### Added
 - **The run now generates the console role-assignment remediation**, as

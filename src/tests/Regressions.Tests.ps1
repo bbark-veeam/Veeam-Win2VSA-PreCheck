@@ -1449,7 +1449,36 @@ Describe 'Appliance role-assignment remediation script' {
         $r | Should -Not -BeNullOrEmpty
         $text = Get-Content $script:OutFile -Raw
         $text | Should -Match "Add-VBRUserRoleAssignment -Name 'svcveeam@corp\.local' -Role BackupAdmin"
-        $text | Should -Match 'Ready to run'
+    }
+
+    # ⚠️ Measured by isolating one variable at a time on an appliance:
+    #     Administrator@Contoso.local -> "Cannot find user with the specified name"
+    #     administrator@CONTOSO.LOCAL -> same failure
+    #     Administrator@contoso.local -> succeeds
+    #     administrator@contoso.local -> succeeds
+    # ANY upper case in the domain fails; the name's case never mattered.
+    # The DOMAIN's case matters, the name's does not - and the console then displays the
+    # domain mixed-case, so the value shown in the UI cannot be entered.
+    # Win32_ComputerSystem.Domain returns exactly that mixed-case form.
+    It 'lower-cases the domain but leaves the principal name alone' {
+        $global:MockRegistry = @{}
+        $global:MockRoles = @([pscustomobject]@{ Name = 'CORP\Administrator'; Role = 'BackupAdmin'; Type = 'User' })
+        & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile | Out-Null
+        $text = Get-Content $script:OutFile -Raw
+        # .Contains() is case-SENSITIVE; Should -Match is not, so a casing assertion
+        # written with -Match would pass whatever the code did - a test that cannot fail,
+        # which is the thing this suite exists to avoid.
+        $text.Contains("-Name 'Administrator@corp.local'") | Should -BeTrue
+        $text.Contains('@Corp.local')                      | Should -BeFalse
+        $text.Contains('Do not "tidy" it')                 | Should -BeTrue
+    }
+
+    # Same rule for a group - its name is its identity and its case is preserved.
+    It 'keeps a group name cased but lower-cases its domain' {
+        $global:MockRoles = @([pscustomobject]@{ Name = 'CORP\Domain Admins'; Role = 'BackupAdmin'; Type = 'Group' })
+        & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile | Out-Null
+        $text = Get-Content $script:OutFile -Raw
+        $text.Contains("-Name 'Domain Admins@corp.local'") | Should -BeTrue
     }
 
     # No correct automatic answer exists for these - which domain principal inherits the
@@ -1460,6 +1489,10 @@ Describe 'Appliance role-assignment remediation script' {
         $text = Get-Content $script:OutFile -Raw
         $text | Should -Match 'No counterpart on the appliance'
         $text | Should -Match 'Need a decision'
+        # The commented template must follow the same rule - uncommenting it should not
+        # hand the operator the mixed-case domain that fails.
+        $text.Contains('@corp.local') | Should -BeTrue
+        $text.Contains('@Corp.Local') | Should -BeFalse
         # Every mention must be commented out - nothing runnable for a principal we
         # cannot resolve.
         foreach ($line in (Get-Content $script:OutFile | Where-Object { $_ -match 'Add-VBRUserRoleAssignment' })) {

@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.7.0
-#  Built   : 2026-08-06 16:29:46
+#  Version : 0.7.1
+#  Built   : 2026-08-06 17:17:28
 #  Sources : 16 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.7.0'
+$script:PrecheckVersion = '0.7.1'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -2182,6 +2182,25 @@ function Export-PrecheckRoleAssignmentScript {
     if (-not $fqdn -and $env:USERDNSDOMAIN) { $fqdn = [string]$env:USERDNSDOMAIN }
     $shortDomain = if ($fqdn) { ($fqdn -split '\.')[0] } else { $null }
 
+    # Groups and users are NOT equivalent here, and treating them alike produced a
+    # script whose user lines failed with "Cannot find user with the specified name".
+    #
+    # For a GROUP, group@domain is Veeam's own input syntax for naming it - groups have
+    # no userPrincipalName - so <name>@<fqdn> resolves and this is confirmed working.
+    #
+    # ⚠️ THE DOMAIN PORTION MUST BE LOWER-CASE, and the console misleads about it.
+    # Measured on an appliance, isolating one variable at a time:
+    #     Administrator@Contoso.local  -> "Cannot find user with the specified name"
+    #     administrator@contoso.local  -> succeeds
+    #     Administrator@contoso.local  -> succeeds
+    # So the NAME's case is irrelevant and the DOMAIN's is not. Once created, the console
+    # then DISPLAYS the account with the mixed-case domain - meaning the form shown in the
+    # UI is not a form that can be entered, and anyone scripting this by copying what they
+    # see will have every line fail.
+    #
+    # Win32_ComputerSystem.Domain returns exactly the mixed-case form that fails, so the
+    # domain is lower-cased here. The name is left alone: it is the principal's identity,
+    # and its case is proven not to matter.
     $cmd       = 'Add-VBRUserRoleAssignment'
     $ready     = [System.Collections.Generic.List[string]]::new()
     $review    = [System.Collections.Generic.List[string]]::new()
@@ -2207,7 +2226,7 @@ function Export-PrecheckRoleAssignmentScript {
             $review.Add("# $name  [$role]")
             $review.Add("#   No counterpart on the appliance. Decide which DOMAIN principal should")
             $review.Add("#   hold this role, then uncomment and complete:")
-            $review.Add("#   $cmd -Name '<user>@$(if ($fqdn) { $fqdn } else { '<domain>' })' -Role $role")
+            $review.Add("#   $cmd -Name '<user>@$(if ($fqdn) { $fqdn.ToLowerInvariant() } else { '<domain>' })' -Role $role")
             $review.Add('')
             continue
         }
@@ -2216,7 +2235,8 @@ function Export-PrecheckRoleAssignmentScript {
         # confidence. Anything else - another domain, an unknown prefix - cannot, so it
         # is emitted for completion rather than guessed.
         if ($prefix -and $shortDomain -and ($prefix -ieq $shortDomain) -and $fqdn) {
-            $ready.Add("$cmd -Name '$leaf@$fqdn' -Role $role")
+            # One rule for users and groups: lower-case the domain, keep the name.
+            $ready.Add("$cmd -Name '$leaf@$($fqdn.ToLowerInvariant())' -Role $role")
             continue
         }
 
@@ -2256,6 +2276,17 @@ function Export-PrecheckRoleAssignmentScript {
     }
     if ($ready.Count -gt 0) {
         $out.Add('# --- Ready to run ------------------------------------------------------------')
+        $out.Add('#')
+        $out.Add('# The domain below is deliberately lower-case. The appliance rejects a')
+        $out.Add('# mixed-case domain on input - Administrator@Contoso.local returns "Cannot find')
+        $out.Add('# user with the specified name" while Administrator@contoso.local is accepted -')
+        $out.Add('# and it then DISPLAYS the account with the domain mixed-case afterwards. So the')
+        $out.Add('# form shown in the console is not a form that can be entered. Do not "tidy" it.')
+        $out.Add('#')
+        $out.Add('# If a line still fails with that message, check the account exists and that its')
+        $out.Add('# userPrincipalName really uses this domain - some directories use a different')
+        $out.Add('# UPN suffix from the domain name.')
+        $out.Add('')
         foreach ($l in $ready) { $out.Add($l) }
         $out.Add('')
     }
