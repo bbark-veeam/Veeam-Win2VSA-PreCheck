@@ -254,19 +254,37 @@ UPN form *on the Windows source* before the migration runs. Combined with point 
 means **essentially every server in the estate needs this done** — it is a planned task per
 server, not an exception, and SEC-005 is the check that enumerates it.
 
-**OPEN — the method, not the requirement.** The console rewrites `<domain>\user` to
-NetBIOS, so the obvious route may not work. What has not been tested is whether a Windows
-VBR will **store a typed UPN** (`user@<domain>`) as entered. Until that is known:
+**TESTED 2026-08-06: a Windows VBR CANNOT store a UPN role assignment.** A user added as
+`administrator@<domain>` came back as `<NETBIOS>\Administrator` after the dialog was closed
+and reopened. The console normalises *every* domain principal to NetBIOS — not just the
+`fqdn\user` form.
 
-- *Console keeps a typed UPN* → the recommendation says exactly that: enter the UPN form,
-  not `fqdn\user`, which Windows silently downgrades.
-- *Console rewrites a UPN too* → the console cannot do it, and the recommendation must name
-  another route — most likely `Add-VBRUserRoleAssignment`, which may bypass the UI
-  normalisation. That needs testing before being recommended.
+**So the pre-migration fix is not available through the console**, and SEC-005's advice to
+re-create assignments in the appliance form before migrating cannot be carried out that way.
 
-**Do not reword the recommendation until the method is confirmed.** Telling operators to
-perform a step the console silently undoes, on every server in a 200-server estate, is worse
-than the finding itself — they would believe it was done.
+**Two questions remain, and a live migration settles both:**
+
+1. **Does `Add-VBRUserRoleAssignment` bypass the UI normalisation?** Untested. Its own help
+   documents `DOMAIN\Username`, which is not encouraging. If it also normalises, there is
+   **no** pre-migration route at all.
+2. **Does the appliance match a migrated NetBIOS assignment by SID?** The evidence that the
+   `@` form is required is the sign-in *form* rejecting other input — which constrains what a
+   person types, not necessarily the stored string. If VBR matches the typed UPN to a
+   migrated NetBIOS assignment by SID, console access survives and SEC-005 over-flags.
+
+**The tool now generates the remediation.** When SEC-005 finds assignments needing
+re-creation, the run writes `precheck-<timestamp>-appliance-role-assignments.ps1` containing
+`Add-VBRUserRoleAssignment` lines in the appliance form, to be read and then run on the
+appliance as `veeamadmin`. A NetBIOS prefix matching the server's own domain is converted
+with confidence; builtin principals and prefixes from other domains are emitted **commented
+out** for a human to complete, because which principal should inherit a builtin role is a
+decision and not something to guess. The precheck itself remains read-only — it writes text.
+
+**The safe remediation under every outcome is post-migration**: the appliance install creates
+`veeamadmin`, so access is never lost; sign in with it, confirm console access for the
+migrated identities, and re-create any assignment that does not work in the appliance form
+(`user@fqdn`, or `group@domain` for a group). That instruction is achievable whichever way
+the two questions resolve, which is more than can be said for the pre-migration one.
 
 ## Note on SEC-005 — the required form differs for a user and a group
 

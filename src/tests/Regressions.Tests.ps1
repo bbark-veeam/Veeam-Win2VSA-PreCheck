@@ -1432,3 +1432,79 @@ Describe 'DB-001 configuration database scoping' {
         (Invoke-DbCheck -UpgradeDate $null).Status | Should -Be 'Pass'
     }
 }
+
+Describe 'Appliance role-assignment remediation script' {
+    BeforeEach {
+        Reset-MockState
+        $script:OutFile = Join-Path ([System.IO.Path]::GetTempPath()) "roles-$([guid]::NewGuid()).ps1"
+    }
+    AfterEach { if (Test-Path $script:OutFile) { Remove-Item $script:OutFile -Force } }
+
+    # The Windows console cannot hold a UPN assignment, so this work happens on the
+    # appliance after migration. Retyping every assignment by hand on every server is
+    # where transcription errors come from; this generates it instead.
+    It 'converts a NetBIOS assignment from this domain into the appliance form' {
+        $global:MockRoles = @([pscustomobject]@{ Name = 'CORP\svcveeam'; Role = 'BackupAdmin'; Type = 'User' })
+        $r = & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile
+        $r | Should -Not -BeNullOrEmpty
+        $text = Get-Content $script:OutFile -Raw
+        $text | Should -Match "Add-VBRUserRoleAssignment -Name 'svcveeam@corp\.local' -Role BackupAdmin"
+        $text | Should -Match 'Ready to run'
+    }
+
+    # No correct automatic answer exists for these - which domain principal inherits the
+    # role is a decision - so they must be emitted commented out, never guessed.
+    It 'refuses to guess a replacement for a builtin principal' {
+        $global:MockRoles = @([pscustomobject]@{ Name = 'BUILTIN\Administrators'; Role = 'BackupAdmin'; Type = 'Group' })
+        & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile | Out-Null
+        $text = Get-Content $script:OutFile -Raw
+        $text | Should -Match 'No counterpart on the appliance'
+        $text | Should -Match 'Need a decision'
+        # Every mention must be commented out - nothing runnable for a principal we
+        # cannot resolve.
+        foreach ($line in (Get-Content $script:OutFile | Where-Object { $_ -match 'Add-VBRUserRoleAssignment' })) {
+            $line.TrimStart() | Should -Match '^#'
+        }
+    }
+
+    It 'does not guess a suffix for a prefix from another domain' {
+        $global:MockRoles = @([pscustomobject]@{ Name = 'OTHERDOM\someone'; Role = 'BackupAdmin'; Type = 'User' })
+        & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile | Out-Null
+        $text = Get-Content $script:OutFile -Raw
+        $text | Should -Match "not this server's domain"
+        $text | Should -Match '<domain>'
+    }
+
+    It 'does not repeat assignments already in an acceptable form' {
+        $global:MockRoles = @(
+            [pscustomobject]@{ Name = 'good@corp.local'; Role = 'BackupAdmin'; Type = 'User' }
+            [pscustomobject]@{ Name = 'CORP\svcveeam';   Role = 'BackupAdmin'; Type = 'User' }
+        )
+        & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile | Out-Null
+        $text = Get-Content $script:OutFile -Raw
+        $text | Should -Match '1 assignment\(s\) on the source were already in an appliance-acceptable form'
+        $text | Should -Not -Match "good@corp\.local' -Role"
+    }
+
+    # It writes text to be read, never executes anything, and the header has to say
+    # where it runs - the whole point is that the source server cannot do this.
+    It 'tells the reader where and when to run it' {
+        $global:MockRoles = @([pscustomobject]@{ Name = 'CORP\svcveeam'; Role = 'BackupAdmin'; Type = 'User' })
+        & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile | Out-Null
+        $text = Get-Content $script:OutFile -Raw
+        $text | Should -Match 'ON THE APPLIANCE, AFTER the migration, signed in as veeamadmin'
+        $text | Should -Match 'READ THIS BEFORE RUNNING IT'
+    }
+
+    It 'writes nothing when every assignment is already acceptable' {
+        $global:MockRoles = @([pscustomobject]@{ Name = 'good@corp.local'; Role = 'BackupAdmin'; Type = 'User' })
+        $r = & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile
+        $r | Should -BeNullOrEmpty
+        Test-Path $script:OutFile | Should -BeFalse
+    }
+
+    It 'writes nothing when there are no assignments at all' {
+        $global:MockRoles = @()
+        & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile | Should -BeNullOrEmpty
+    }
+}

@@ -37,8 +37,8 @@
   <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
   <div class="meta">Server: BACKUP02.corp.local &nbsp;|&nbsp;
     Build: Veeam Backup &amp; Replication 13.1.0.411 &nbsp;|&nbsp;
-    Generated: 2026-08-06 11:39:43 -04:00 &nbsp;|&nbsp;
-    Precheck version: 0.6.0 &nbsp;|&nbsp;
+    Generated: 2026-08-06 16:29:47 -04:00 &nbsp;|&nbsp;
+    Precheck version: 0.7.0 &nbsp;|&nbsp;
     Reference: KB4800 (captured 2026-07-24)</div>
 </header>
 <div class="wrap">
@@ -131,7 +131,7 @@
   <td>
     <div class="title">Console role assignment format</div>
     <div class="detail">2 of 2 console role assignment(s) read on this server are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created.</div>
-    <div class='rec'>&#8594; Before migrating, re-create each assignment below in the appliance form: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: &quot;Specify a username in the UPN format (username@domain.com).&quot;</div>
+    <div class='rec'>&#8594; Add these on the Veeam Software Appliance in the form it requires: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). This cannot be prepared on the Windows server - it stores domain principals in DOMAIN\user form and converts a UPN entry straight back - so the work is done on the appliance AFTER the migration, signing in with the veeamadmin account its install creates. Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: &quot;Specify a username in the UPN format (username@domain.com).&quot;</div>
     <ul class='ev'><li>Administrators  [Group, role: BackupAdmin]  -&gt; unqualified name - the appliance needs group@domain</li><li>CORP\Administrator  [User, role: BackupAdmin]  -&gt; prefixed form - the appliance needs user@fqdn</li></ul>
   </td>
   <td class="cat">Security</td>

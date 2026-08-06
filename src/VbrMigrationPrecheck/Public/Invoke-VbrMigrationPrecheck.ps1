@@ -138,6 +138,28 @@ function Invoke-VbrMigrationPrecheck {
         }
     }
 
+    # --- Console role assignment remediation script ---------------------------
+    # Written only when there is something to re-create, so a server with nothing to
+    # do does not gain a fifth artefact. Suppressed with -ReportFormat None along with
+    # the reports, since it is a file written to the output folder like the rest.
+    #
+    # This produces TEXT for an operator to read and run on the appliance. Nothing is
+    # executed here and nothing on this server is changed.
+    if ($ReportFormat -ne 'None') {
+        try {
+            $rolePath = Join-Path $OutputPath "precheck-$stamp-appliance-role-assignments.ps1"
+            $written = Export-PrecheckRoleAssignmentScript -Path $rolePath -Context $ctx
+            if ($written) {
+                Write-PrecheckLog "Appliance role-assignment script: $written" -Level INFO
+                Write-PrecheckLog "  Run it ON THE APPLIANCE after migration, as veeamadmin. Review it first." -Level INFO
+            }
+        }
+        catch {
+            # A remediation aid must never take down the precheck itself.
+            Write-PrecheckLog "Could not write the role-assignment script: $($_.Exception.Message)" -Level WARN
+        }
+    }
+
     # Make the exit code available without forcing it on interactive callers.
     $global:LASTPRECHECKEXITCODE = $verdict.ExitCode
 

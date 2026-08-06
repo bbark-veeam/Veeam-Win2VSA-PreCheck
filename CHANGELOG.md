@@ -50,6 +50,35 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.7.0] - 2026-08-06
+### Added
+- **The run now generates the console role-assignment remediation**, as
+  `precheck-<timestamp>-appliance-role-assignments.ps1`, written only when there is
+  something to re-create. It contains `Add-VBRUserRoleAssignment` lines in the appliance
+  form, to be **read and then run on the appliance after migration, signed in as
+  `veeamadmin`**. Doing this by hand means retyping every assignment on every server in the
+  estate, which is where transcription errors come from.
+- **It refuses to guess.** A NetBIOS prefix matching the server's own domain is converted
+  with confidence. A builtin or machine-local principal has no counterpart on the appliance
+  and which domain principal should inherit the role is a *decision*, so those are emitted
+  **commented out** with an explanation. A prefix from another domain is emitted the same
+  way, since the correct suffix is not knowable from the source. Eight cases cover it.
+- The precheck stays read-only: it writes text and executes nothing. The generated commands
+  are assembled from a variable so no Veeam write cmdlet appears at the start of a line in
+  the shipped artefact, which is how the build tests enforce that guarantee.
+
+### Fixed
+- **SEC-005's remediation told operators to do something the console makes impossible.** It
+  advised re-creating assignments in UPN form on the Windows server before migrating.
+  Measured: a Windows VBR normalises *every* domain principal to `DOMAIN\user` — a user
+  added as `user@fqdn` comes back as `DOMAIN\user` once the dialog is reopened — while the
+  appliance does the opposite and stores UPN. The work therefore happens **on the appliance,
+  after the migration**, which is also where KB4800 places it. Creating the assignments on
+  the appliance beforehand is untested and probably futile, since migration injects the
+  database and would most likely overwrite them.
+- Role assignments are now read through the cache, so the check and the generator share one
+  round-trip rather than two.
+
 ## [0.6.0] - 2026-08-06
 ### Added
 - **DB-001 now reads the configuration database engine, and passes outright on PostgreSQL.**

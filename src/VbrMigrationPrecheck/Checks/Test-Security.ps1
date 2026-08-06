@@ -113,9 +113,17 @@ function Test-RoleAssignmentUpnFormat {
     # accepted because the Add Windows Server wizard takes "USER@FQDN or FQDN\USER".
     # Do not harmonise the two.
     #
-    # Action rather than Blocker: the appliance install creates veeamadmin, so access
-    # is not lost, but these assignments stop working until re-created in UPN form,
-    # which can be done before migrating.
+    # Action rather than Blocker: the appliance install creates veeamadmin, so access is
+    # not lost, but these assignments stop working until re-created in UPN form.
+    #
+    # ⚠️ That re-creation CANNOT be prepared on this server. Measured: a Windows VBR
+    # normalises every domain principal to DOMAIN\user - entering user@fqdn and reopening
+    # the dialog gives DOMAIN\user back. The appliance does the opposite, storing UPN. So
+    # the work happens ON THE APPLIANCE, AFTER migration, via veeamadmin - which is where
+    # KB4800 places it too. Creating the assignments on the appliance BEFOREHAND is
+    # untested and probably futile: migration injects the database, so anything already
+    # there would most likely be overwritten.
+    # Do not reword this to advise fixing it here; the console silently undoes it.
     if (-not (Test-PrecheckCmdlet 'Get-VBRUserRoleAssignment')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
             -Detail 'Console role assignments could not be read on this server.' `
@@ -148,7 +156,7 @@ function Test-RoleAssignmentUpnFormat {
     $ok  = 0
     $readAssignments = $false
     try {
-        foreach ($ra in Get-VBRUserRoleAssignment -ErrorAction SilentlyContinue) {
+        foreach ($ra in @(Get-PrecheckCached -Key 'RoleAssignments' -Getter { Get-VBRUserRoleAssignment -ErrorAction SilentlyContinue })) {
             $nm = [string]$ra.Name
             if (-not $nm) { continue }
             $role = if ($ra.PSObject.Properties['Role']) { [string]$ra.Role } else { '' }
@@ -195,7 +203,7 @@ function Test-RoleAssignmentUpnFormat {
     # discrepancy against the console undiagnosable from the report alone.
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Action `
         -Detail "$($bad.Count) of $($bad.Count + $ok) console role assignment(s) read on this server are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created." `
-        -Recommendation 'Before migrating, re-create each assignment below in the appliance form: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: "Specify a username in the UPN format (username@domain.com)."' `
+        -Recommendation 'Add these on the Veeam Software Appliance in the form it requires: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). This cannot be prepared on the Windows server - it stores domain principals in DOMAIN\user form and converts a UPN entry straight back - so the work is done on the appliance AFTER the migration, signing in with the veeamadmin account its install creates. Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: "Specify a username in the UPN format (username@domain.com)."' `
         -Evidence ($bad | Sort-Object -Unique)
 }
 

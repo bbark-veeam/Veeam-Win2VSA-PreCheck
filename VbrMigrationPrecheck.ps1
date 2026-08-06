@@ -47,9 +47,9 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.6.0
-#  Built   : 2026-08-06 11:39:42
-#  Sources : 15 files
+#  Version : 0.7.0
+#  Built   : 2026-08-06 16:29:46
+#  Sources : 16 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
 #  are lost on the next build.
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.6.0'
+$script:PrecheckVersion = '0.7.0'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -1506,9 +1506,17 @@ function Test-RoleAssignmentUpnFormat {
     # accepted because the Add Windows Server wizard takes "USER@FQDN or FQDN\USER".
     # Do not harmonise the two.
     #
-    # Action rather than Blocker: the appliance install creates veeamadmin, so access
-    # is not lost, but these assignments stop working until re-created in UPN form,
-    # which can be done before migrating.
+    # Action rather than Blocker: the appliance install creates veeamadmin, so access is
+    # not lost, but these assignments stop working until re-created in UPN form.
+    #
+    # ⚠️ That re-creation CANNOT be prepared on this server. Measured: a Windows VBR
+    # normalises every domain principal to DOMAIN\user - entering user@fqdn and reopening
+    # the dialog gives DOMAIN\user back. The appliance does the opposite, storing UPN. So
+    # the work happens ON THE APPLIANCE, AFTER migration, via veeamadmin - which is where
+    # KB4800 places it too. Creating the assignments on the appliance BEFOREHAND is
+    # untested and probably futile: migration injects the database, so anything already
+    # there would most likely be overwritten.
+    # Do not reword this to advise fixing it here; the console silently undoes it.
     if (-not (Test-PrecheckCmdlet 'Get-VBRUserRoleAssignment')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
             -Detail 'Console role assignments could not be read on this server.' `
@@ -1541,7 +1549,7 @@ function Test-RoleAssignmentUpnFormat {
     $ok  = 0
     $readAssignments = $false
     try {
-        foreach ($ra in Get-VBRUserRoleAssignment -ErrorAction SilentlyContinue) {
+        foreach ($ra in @(Get-PrecheckCached -Key 'RoleAssignments' -Getter { Get-VBRUserRoleAssignment -ErrorAction SilentlyContinue })) {
             $nm = [string]$ra.Name
             if (-not $nm) { continue }
             $role = if ($ra.PSObject.Properties['Role']) { [string]$ra.Role } else { '' }
@@ -1588,7 +1596,7 @@ function Test-RoleAssignmentUpnFormat {
     # discrepancy against the console undiagnosable from the report alone.
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Action `
         -Detail "$($bad.Count) of $($bad.Count + $ok) console role assignment(s) read on this server are not in the form the Veeam Software Appliance requires, so they will not work after migration. Access is not lost outright - the appliance install creates a veeamadmin account - but the administrators listed below will be unable to log in until their assignments are re-created." `
-        -Recommendation 'Before migrating, re-create each assignment below in the appliance form: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: "Specify a username in the UPN format (username@domain.com)."' `
+        -Recommendation 'Add these on the Veeam Software Appliance in the form it requires: a domain USER as user@fqdn, a domain SECURITY GROUP as group@domain (for example Administrators@tech.local). This cannot be prepared on the Windows server - it stores domain principals in DOMAIN\user form and converts a UPN entry straight back - so the work is done on the appliance AFTER the migration, signing in with the veeamadmin account its install creates. Local and builtin principals have no counterpart on the appliance, so assign a domain principal instead. The sign-in page rejects a non-UPN username with: "Specify a username in the UPN format (username@domain.com)."' `
         -Evidence ($bad | Sort-Object -Unique)
 }
 
@@ -2126,6 +2134,141 @@ $nextStepsHtml
 }
 
 # -----------------------------------------------------------------------------
+# VbrMigrationPrecheck/Public/Export-PrecheckRoleAssignmentScript.ps1
+# -----------------------------------------------------------------------------
+# Export-PrecheckRoleAssignmentScript
+# Writes a ready-to-review PowerShell script that re-creates this Windows server's
+# console role assignments ON THE APPLIANCE, in the form the appliance requires.
+#
+# Why this exists. A Windows VBR normalises every domain principal to DOMAIN\user -
+# entering user@fqdn and reopening the dialog gives DOMAIN\user back - while the
+# appliance sign-in accepts only user@fqdn. The assignments therefore cannot be
+# prepared on the source, and KB4800 places the work after the migration. Doing it by
+# hand means retyping every assignment on every server in the estate, which is where
+# the transcription errors come from.
+#
+# THIS FUNCTION WRITES A TEXT FILE. It never executes anything and never changes this
+# server. The generated script is meant to be READ, then run on the appliance by an
+# operator signed in as veeamadmin.
+#
+# Note for anyone editing: the generated commands are assembled from a variable so
+# that no Veeam write cmdlet appears at the start of a line in THIS file - the build
+# tests assert the shipped artefact contains none, which is how the tool's read-only
+# guarantee is enforced.
+
+function Export-PrecheckRoleAssignmentScript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        $Context
+    )
+
+    if (-not (Test-PrecheckCmdlet 'Get-VBRUserRoleAssignment')) { return $null }
+
+    $assignments = @()
+    try {
+        $assignments = @(Get-PrecheckCached -Key 'RoleAssignments' -Getter { Get-VBRUserRoleAssignment -ErrorAction SilentlyContinue })
+    } catch { return $null }
+    if ($assignments.Count -eq 0) { return $null }
+
+    # The domain this server belongs to, so NETBIOS\name can become name@fqdn. Same
+    # resolution SEC-004 uses. Without it nothing can be converted automatically and
+    # every line is emitted for the operator to complete by hand.
+    $fqdn = $null
+    try {
+        $cs = Get-PrecheckCached -Key 'ComputerSystem' -Getter { Get-CimInstance Win32_ComputerSystem -ErrorAction Stop }
+        if ($cs.PartOfDomain -and $cs.Domain) { $fqdn = [string]$cs.Domain }
+    } catch { }
+    if (-not $fqdn -and $env:USERDNSDOMAIN) { $fqdn = [string]$env:USERDNSDOMAIN }
+    $shortDomain = if ($fqdn) { ($fqdn -split '\.')[0] } else { $null }
+
+    $cmd       = 'Add-VBRUserRoleAssignment'
+    $ready     = [System.Collections.Generic.List[string]]::new()
+    $review    = [System.Collections.Generic.List[string]]::new()
+    $already   = 0
+
+    foreach ($ra in $assignments) {
+        $name = [string]$ra.Name
+        if (-not $name) { continue }
+        $role = if ($ra.PSObject.Properties['Role'] -and $ra.Role) { [string]$ra.Role } else { 'BackupAdmin' }
+
+        # Already in an appliance-acceptable form - nothing to re-create.
+        if ($name -match '@') { $already++; continue }
+
+        $prefix = if ($name -match '\\') { $name.Split('\')[0] } else { '' }
+        $leaf   = if ($name -match '\\') { $name.Substring($name.IndexOf('\') + 1) } else { $name }
+
+        # BUILTIN, NT AUTHORITY and machine-local principals have no counterpart on a
+        # Linux appliance. There is no correct automatic answer - which domain principal
+        # should inherit the role is a decision - so these are emitted commented out.
+        $isLocal = ($prefix -match '^(BUILTIN|NT AUTHORITY)$') -or
+                   ($prefix -and $env:COMPUTERNAME -and ($prefix -ieq $env:COMPUTERNAME))
+        if ($isLocal) {
+            $review.Add("# $name  [$role]")
+            $review.Add("#   No counterpart on the appliance. Decide which DOMAIN principal should")
+            $review.Add("#   hold this role, then uncomment and complete:")
+            $review.Add("#   $cmd -Name '<user>@$(if ($fqdn) { $fqdn } else { '<domain>' })' -Role $role")
+            $review.Add('')
+            continue
+        }
+
+        # A NetBIOS prefix matching this server's own domain can be converted with
+        # confidence. Anything else - another domain, an unknown prefix - cannot, so it
+        # is emitted for completion rather than guessed.
+        if ($prefix -and $shortDomain -and ($prefix -ieq $shortDomain) -and $fqdn) {
+            $ready.Add("$cmd -Name '$leaf@$fqdn' -Role $role")
+            continue
+        }
+
+        $review.Add("# $name  [$role]")
+        $review.Add("#   Prefix '$prefix' is not this server's domain, so the correct suffix is not")
+        $review.Add("#   known here. Complete and uncomment:")
+        $review.Add("#   $cmd -Name '$leaf@<domain>' -Role $role")
+        $review.Add('')
+    }
+
+    if ($ready.Count -eq 0 -and $review.Count -eq 0) { return $null }
+
+    $server = if ($Context -and $Context.Server) { $Context.Server } else { $env:COMPUTERNAME }
+    $out = [System.Collections.Generic.List[string]]::new()
+    $out.Add('# Console role assignments to re-create on the Veeam Software Appliance.')
+    $out.Add("# Generated by VbrMigrationPrecheck $(if ($script:PrecheckVersion) { $script:PrecheckVersion } else { '' }) from $server on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss').")
+    $out.Add('#')
+    $out.Add('# READ THIS BEFORE RUNNING IT.')
+    $out.Add('#')
+    $out.Add('# Run this ON THE APPLIANCE, AFTER the migration, signed in as veeamadmin.')
+    $out.Add('# KB4800 lists re-creating console access as a post-migration task. Creating these')
+    $out.Add('# beforehand is unlikely to help: the migration injects the database, so anything')
+    $out.Add('# already present would most likely be overwritten.')
+    $out.Add('#')
+    $out.Add('# Why it cannot be done on the Windows server: that console normalises every domain')
+    $out.Add('# principal to DOMAIN\user and converts a user@fqdn entry straight back, while the')
+    $out.Add('# appliance sign-in accepts only user@fqdn.')
+    $out.Add('#')
+    $out.Add('# Check every line against your own records before running. This was generated from')
+    $out.Add('# what the source server held; it does not know which of those principals should')
+    $out.Add('# still have access.')
+    $out.Add('')
+    if ($already -gt 0) {
+        $out.Add("# $already assignment(s) on the source were already in an appliance-acceptable form")
+        $out.Add('# and are not repeated here.')
+        $out.Add('')
+    }
+    if ($ready.Count -gt 0) {
+        $out.Add('# --- Ready to run ------------------------------------------------------------')
+        foreach ($l in $ready) { $out.Add($l) }
+        $out.Add('')
+    }
+    if ($review.Count -gt 0) {
+        $out.Add('# --- Need a decision before they can be run ----------------------------------')
+        foreach ($l in $review) { $out.Add($l) }
+    }
+
+    $out -join [Environment]::NewLine | Set-Content -Path $Path -Encoding UTF8
+    return $Path
+}
+
+# -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Public/Invoke-VbrMigrationPrecheck.ps1
 # -----------------------------------------------------------------------------
 # Invoke-VbrMigrationPrecheck
@@ -2265,6 +2408,28 @@ function Invoke-VbrMigrationPrecheck {
             $path = Join-Path $OutputPath "precheck-$stamp.$($f.ToLower())"
             Export-PrecheckReport -Results $results -Verdict $verdict -Context $ctx -Format $f -Path $path
             Write-PrecheckLog "$f report: $path" -Level INFO
+        }
+    }
+
+    # --- Console role assignment remediation script ---------------------------
+    # Written only when there is something to re-create, so a server with nothing to
+    # do does not gain a fifth artefact. Suppressed with -ReportFormat None along with
+    # the reports, since it is a file written to the output folder like the rest.
+    #
+    # This produces TEXT for an operator to read and run on the appliance. Nothing is
+    # executed here and nothing on this server is changed.
+    if ($ReportFormat -ne 'None') {
+        try {
+            $rolePath = Join-Path $OutputPath "precheck-$stamp-appliance-role-assignments.ps1"
+            $written = Export-PrecheckRoleAssignmentScript -Path $rolePath -Context $ctx
+            if ($written) {
+                Write-PrecheckLog "Appliance role-assignment script: $written" -Level INFO
+                Write-PrecheckLog "  Run it ON THE APPLIANCE after migration, as veeamadmin. Review it first." -Level INFO
+            }
+        }
+        catch {
+            # A remediation aid must never take down the precheck itself.
+            Write-PrecheckLog "Could not write the role-assignment script: $($_.Exception.Message)" -Level WARN
         }
     }
 

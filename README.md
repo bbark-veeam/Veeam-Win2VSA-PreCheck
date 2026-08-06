@@ -103,6 +103,20 @@ Three artefacts are written to the output folder, plus a console summary:
 | `precheck-<timestamp>.json` | The same results, for collecting across servers |
 | `precheck-<timestamp>.log` | Run log |
 
+A fourth file appears **only when there is something to do with it**:
+
+| File | Contents |
+|---|---|
+| `precheck-<timestamp>-appliance-role-assignments.ps1` | Commands to re-create this server's console role assignments **on the appliance** |
+
+That last one exists because a Windows backup server stores domain principals as
+`DOMAIN\user` and converts a `user@fqdn` entry straight back, while the appliance sign-in
+accepts only `user@fqdn`. The assignments therefore cannot be prepared on the source, and
+KB4800 lists re-creating console access as a post-migration task. **Read the file, then run
+it on the appliance after migration, signed in as `veeamadmin`.** Anything it cannot resolve
+safely — builtin principals, or a prefix from another domain — is written commented out for
+you to complete, never guessed.
+
 **See it before you run it:** [`examples/`](examples/) holds two sample reports — one from
 a server with nothing wrong with it, and one from a server that cannot migrate. Both are
 self-contained HTML with invented data; open either in a browser.
