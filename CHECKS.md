@@ -385,11 +385,22 @@ Evidence for each cell:
 
 - **Sign-in rejects `fqdn\user` outright**, with *"Specify a username in the UPN format
   (username@domain.com)."* So console access genuinely is UPN-only.
-- **Users & Roles accepts `fqdn\user` on input but Veeam itself rewrites it to UPN** —
+- **On the appliance, Users & Roles accepts `fqdn\user` on input but rewrites it to UPN** —
   a group entered as `<domain>\Domain Admins` reappears as `Domain Admins@<domain>`, and a
   user entered as `<domain>\<user>` as `<user>@<domain>`, simply from closing and reopening
-  the dialog. So a dotted-prefix assignment is transient and SEC-005 will rarely see one;
-  its real findings are NetBIOS, BUILTIN and machine-local principals.
+  the dialog.
+  **⚠️ That is APPLIANCE behaviour, observed on a VSA — do not read it as a reason SEC-005
+  will not see dotted-prefix assignments.** SEC-005 runs on the **Windows source**, where
+  no such rewrite has been observed, so an `fqdn\user` assignment there can persist and is
+  a genuine finding.
+  **It may also be a reason the finding matters MORE.** The rewrite looks like a UI-layer
+  conversion — the appliance may never write the prefixed form to its database at all. The
+  migration performs a **database injection**, which bypasses that UI entirely, so a
+  prefixed assignment carried over from the Windows source could land in the appliance
+  database unconverted and simply not work for sign-in. Nothing in the UI would have had
+  the chance to fix it. **Unproven** — a physical migration is the way to settle it, and it
+  is the reason not to advise leaving a prefixed assignment in place and expecting it to
+  convert itself.
 - **Datacenter credentials do NOT get rewritten.** A credential stored as
   `<domain>\administrator` is still in that form after repeated reboots and reloads, and it
   works for connecting to managed servers. NetBIOS-prefixed does not.

@@ -21,10 +21,13 @@ produces.
   stored in that form **works and persists** for reaching managed servers. SEC-002 already
   accepted a dotted prefix and SEC-005 already required the `@` form, so the deliberate
   asymmetry between them is confirmed rather than corrected.
-- Also observed: **Users & Roles rewrites `fqdn\user` to UPN by itself** — an entry typed in
-  the prefixed form reappears in UPN form after the dialog is closed and reopened. So a
-  dotted-prefix role assignment is transient, and SEC-005's real findings are NetBIOS,
-  BUILTIN and machine-local principals. Datacenter credentials are **not** rewritten.
+- Also observed, **on the appliance**: Users & Roles rewrites `fqdn\user` to UPN by itself
+  once the dialog is closed and reopened. Datacenter credentials are **not** rewritten.
+  This does **not** mean SEC-005 rarely sees prefixed assignments — it runs on the Windows
+  source, where no such rewrite has been seen. If anything it raises the stakes: the rewrite
+  looks like a UI-layer conversion, and migration injects the database directly, so a
+  prefixed assignment could arrive on the appliance unconverted and never work for sign-in.
+  Unproven, and a physical migration is what would settle it.
 - The reference now records this as a table with the evidence for each cell, and says
   explicitly **not** to "correct" SEC-002 to match the KB sentence — doing so would tell
   operators to change credentials that work, on every server using that form.
