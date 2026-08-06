@@ -28,6 +28,11 @@ function Export-PrecheckReport {
             generatedAt   = $generated
             server        = if ($Context) { $Context.Server } else { $null }
             productBuild  = if ($Context) { $Context.ProductString } else { $null }
+            # The Veeam v13 module requires PowerShell 7.6 and will not load below it,
+            # so the host's version is a compatibility fact about the run, not trivia -
+            # and without it a report that behaved oddly cannot be tied to the version
+            # it ran on. The context carries it already; it was simply never emitted.
+            psVersion     = if ($Context -and $Context.PSVersion) { "$($Context.PSVersion)" } else { "$($PSVersionTable.PSVersion)" }
             verdict       = $Verdict.Label
             exitCode      = $Verdict.ExitCode
             counts        = $Verdict.Counts

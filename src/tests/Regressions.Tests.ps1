@@ -1254,3 +1254,109 @@ Describe 'PRE-004 appliance timezone' {
         (Invoke-Check 'Test-PreStorageTimezone').Status | Should -Be 'Skipped'
     }
 }
+
+# --------------------------------------------------------------------------------
+# G3 — the verdict and exit-code contract. This is how a fleet consumes the tool:
+# the customer runs it per server and the exit code is what an unattended wrapper
+# acts on, so the mapping matters as much as any individual check.
+#
+# Get-PrecheckVerdict is a pure function of the results, so it is driven directly
+# with crafted result sets. It reads only .Status, hence the minimal objects.
+# --------------------------------------------------------------------------------
+
+Describe 'Verdict and exit code' {
+
+    BeforeAll {
+        function Get-Verdict {
+            param([array] $Statuses)
+            $results = @($Statuses | ForEach-Object { [pscustomobject]@{ Status = $_ } })
+            & $script:Mod ([scriptblock]::Create('param($r) Get-PrecheckVerdict -Results $r')) $results
+        }
+    }
+
+    It 'blocks, with exit code 2, on any Blocker' {
+        $v = Get-Verdict @('Pass','Blocker','Manual','Skipped')
+        $v.Label    | Should -Be 'MIGRATION BLOCKED'
+        $v.ExitCode | Should -Be 2
+    }
+
+    It 'requires action, with exit code 1, when there is an Action and no Blocker' {
+        $v = Get-Verdict @('Pass','Action','Manual','Info')
+        $v.Label    | Should -Be 'ACTION REQUIRED'
+        $v.ExitCode | Should -Be 1
+    }
+
+    # A Blocker outranks everything: a server with both must not report merely
+    # "action required", which an unattended wrapper would treat as proceedable.
+    It 'ranks a Blocker above an Action' {
+        (Get-Verdict @('Action','Blocker')).Label | Should -Be 'MIGRATION BLOCKED'
+    }
+
+    It 'reviews warnings, with exit code 0, for Warning, Manual or Info alone' {
+        foreach ($s in 'Warning','Manual','Info') {
+            $v = Get-Verdict @('Pass', $s)
+            $v.Label    | Should -Be 'REVIEW WARNINGS' -Because "a lone $s should not clear the run"
+            $v.ExitCode | Should -Be 0
+        }
+    }
+
+    It 'reports READY, with exit code 0, only when everything is Pass or Skipped' {
+        $v = Get-Verdict @('Pass','Pass','Skipped')
+        $v.Label    | Should -Be 'READY'
+        $v.ExitCode | Should -Be 0
+    }
+
+    # NextStep is advisory pre-migration preparation and must never downgrade the
+    # verdict - otherwise PRE-002, which always emits one, would stop every server
+    # from ever reporting a clean result.
+    It 'never downgrades the verdict for a NextStep' {
+        $v = Get-Verdict @('Pass','Pass','NextStep','Skipped')
+        $v.Label    | Should -Be 'READY'
+        $v.ExitCode | Should -Be 0
+    }
+
+    # The HTML and console once listed the parts without Skipped, so "25 checks" was
+    # followed by figures summing to 22. A customer can spot that.
+    It 'reconciles the counts against the total' {
+        $statuses = @('Blocker','Action','Warning','Manual','NextStep','Info','Pass','Pass','Skipped')
+        $v = Get-Verdict $statuses
+        $v.Total | Should -Be $statuses.Count
+        $sum = 0
+        foreach ($s in 'Blocker','Action','Warning','Manual','NextStep','Info','Pass','Skipped') {
+            $sum += $v.Counts[$s]
+        }
+        $sum | Should -Be $v.Total -Because 'every result must fall into exactly one counted bucket'
+    }
+
+    It 'counts each status accurately' {
+        $v = Get-Verdict @('Pass','Pass','Pass','Manual','Skipped')
+        $v.Counts['Pass']    | Should -Be 3
+        $v.Counts['Manual']  | Should -Be 1
+        $v.Counts['Skipped'] | Should -Be 1
+        $v.Counts['Blocker'] | Should -Be 0
+    }
+}
+
+Describe 'READY is unreachable on a real server' {
+    BeforeEach { Reset-MockState }
+
+    # Documented consequence rather than a defect: SEC-001 and SEC-003 return Manual
+    # unconditionally, because neither four-eyes state nor trusted-domain
+    # authentication is exposed to PowerShell at all. Any Manual demotes the verdict,
+    # so the best result a real server can reach is REVIEW WARNINGS with those two
+    # outstanding - which is a clean bill of health, and the examples README says so.
+    #
+    # If this test ever fails, the ladder or those two checks changed, and the
+    # decision recorded in the roadmap needs revisiting rather than the test.
+    It 'is guaranteed by the two permanently manual checks' {
+        (Invoke-Check 'Test-FourEyes').Status        | Should -Be 'Manual'
+        (Invoke-Check 'Test-TrustedDomainAuth').Status | Should -Be 'Manual'
+
+        $withThoseTwo = @('Manual','Manual') + (1..23 | ForEach-Object { 'Pass' })
+        $results = @($withThoseTwo | ForEach-Object { [pscustomobject]@{ Status = $_ } })
+        $v = & $script:Mod ([scriptblock]::Create('param($r) Get-PrecheckVerdict -Results $r')) $results
+        $v.Label    | Should -Be 'REVIEW WARNINGS'
+        $v.Label    | Should -Not -Be 'READY'
+        $v.ExitCode | Should -Be 0
+    }
+}

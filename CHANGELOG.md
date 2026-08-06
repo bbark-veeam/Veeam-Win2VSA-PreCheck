@@ -31,6 +31,42 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.5.2] - 2026-08-06
+### Fixed
+- **The stated PowerShell prerequisite was wrong, and it would have failed customers.** The
+  tool asked for **7.0**; the Veeam v13 module requires **7.6** and refuses to load below
+  it: *"The version of PowerShell on this computer is '7.4.13'. The module … requires a
+  minimum PowerShell version of '7.6' to run."* A server on 7.4 therefore passed every
+  stated prerequisite and then failed at import — and because the import failed,
+  `Connect-VBRServer` did not exist either, so the error read as a missing Veeam
+  installation rather than an out-of-date PowerShell. On a tool the customer runs
+  themselves across roughly 200 servers, that is a wrong instruction, not a footnote.
+  The requirement is now 7.6 in the manifest, the entry script's `#Requires`, and the
+  README, which also explains the misleading second error.
+- **The version guard only checked the major version**, so 7.4 passed it and the failure
+  surfaced as a module problem. It now compares the full version and says plainly that the
+  minimum comes from the Veeam module, not from this tool.
+
+### Added
+- **The report records the PowerShell version.** The context already carried it and the
+  JSON simply never emitted it. Now that the module has a hard version floor, this is a
+  compatibility fact about the run: without it, a report that behaved oddly cannot be tied
+  to the version it ran on.
+- **Verdict and exit-code tests (G3).** All four verdicts, their exit codes, the ranking of
+  Blocker above Action, that `NextStep` never downgrades a result, and that the counts
+  reconcile against the total — the invariant that once let the report print "25 checks"
+  followed by parts summing to 22. Five mutations, all caught.
+- **A test documenting that `READY` is unreachable on a real server**, since SEC-001 and
+  SEC-003 defer unconditionally and any `Manual` demotes the verdict. If it ever fails, the
+  ladder or those checks changed and the decision needs revisiting — not the test.
+
+### Changed
+- **NEC Storage V Series is now named** wherever Hitachi and HPE XP are, in STG-002 and
+  PRE-004. KB4800 lists it with the same 2.2.271 plug-in minimum and the same timezone
+  consideration, and it integrates through the same Universal Storage Plugin — so detection
+  was already correct, but an operator with NEC storage would have read "Hitachi / HPE XP"
+  and concluded the finding did not apply to them.
+
 ## [0.5.1] - 2026-08-06
 ### Changed
 - **DEP-001 now states that the licence file alone is what blocks the migration**, because

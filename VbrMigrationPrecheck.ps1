@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+#Requires -Version 7.6
 <#
 .SYNOPSIS
     Runs the Windows VBR -> Veeam Software Appliance migration precheck (KB4800).
@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.5.1
-#  Built   : 2026-08-06 09:46:06
+#  Version : 0.5.2
+#  Built   : 2026-08-06 10:51:58
 #  Sources : 15 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.5.1'
+$script:PrecheckVersion = '0.5.2'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -1336,24 +1336,24 @@ function Test-PreFileToTapeHostname {
 function Test-PreStorageTimezone {
     [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
 
-    # Consideration #8: for Hitachi and HPE XP systems, the timezone set on the
+    # Consideration #8: for Hitachi, HPE XP and NEC Storage V Series systems, the timezone set on the
     # VSA must match the timezone of the Windows machine. Those integrate via the
     # Universal Storage Plugin (Get-StoragePluginHost).
-    $id = 'PRE-004'; $cat = 'Preparation'; $title = 'Appliance timezone (Hitachi / HPE XP)'
+    $id = 'PRE-004'; $cat = 'Preparation'; $title = 'Appliance timezone (Hitachi / HPE XP / NEC)'
 
     if (-not (Test-PrecheckCmdlet 'Get-StoragePluginHost')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Skipped `
-            -Detail 'Hitachi / HPE XP integration could not be checked on this server.'
+            -Detail 'Hitachi / HPE XP / NEC Storage V Series integration could not be checked on this server.'
     }
     $hosts = @(Get-PrecheckCached -Key 'StoragePluginHosts' -Getter { Get-StoragePluginHost -ErrorAction SilentlyContinue })
     if ($hosts.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Skipped `
-            -Detail 'No Universal Storage Plugin (Hitachi/HPE XP) systems detected; timezone-alignment step not applicable.'
+            -Detail 'No Universal Storage Plugin (Hitachi / HPE XP / NEC Storage V Series) systems detected; timezone-alignment step not applicable.'
     }
 
     $tz = try { (Get-TimeZone).Id } catch { 'unknown' }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status NextStep `
-        -Detail "$($hosts.Count) Universal Storage Plugin system(s) present (may include Hitachi / HPE XP). This Windows machine's timezone is '$tz'." `
+        -Detail "$($hosts.Count) Universal Storage Plugin system(s) present (may include Hitachi, HPE XP or NEC Storage V Series). This Windows machine's timezone is '$tz'." `
         -Recommendation "Before/at migration, set the Veeam Software Appliance timezone to match this Windows machine's timezone ('$tz') so Hitachi / HPE XP snapshot scheduling stays aligned." `
         -Evidence ($hosts | ForEach-Object { "Storage plugin host: $($_.Name)" })
 }
@@ -1685,7 +1685,7 @@ function Test-RepositoryLocalAccounts {
 #   NetApp ONTAP ............. Get-NetAppHost
 #   HPE Nimble / Alletra 5/6k  Get-NimbleHost
 #   Universal Storage Plugin . Get-StoragePluginHost  (IBM FlashSystem, Hitachi,
-#                              HPE XP, Fujitsu, etc.)
+#                              HPE XP, NEC Storage V Series, Fujitsu, etc.)
 #   HPE 3PAR/Primera ......... Get-HP3Storage
 #   Dell VNX ................. Get-VNXHost
 #   Cisco HyperFlex .......... Get-HyperFlexHost
@@ -1720,23 +1720,23 @@ function Test-StoragePluginVersions {
 
     $id = 'STG-002'; $cat = 'Storage'; $title = 'Universal Storage Plugin versions'
 
-    # IBM FlashSystem, Hitachi and HPE XP all integrate via the Universal Storage
+    # IBM FlashSystem, Hitachi, HPE XP and NEC Storage V Series all integrate via the Universal Storage
     # Plugin -> Get-StoragePluginHost. The cmdlet doesn't split by vendor, so we
     # report presence and the post-migration minimum plug-in versions from KB4800.
     if (-not (Test-PrecheckCmdlet 'Get-StoragePluginHost')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
             -Detail 'Universal Storage Plugin integration could not be checked on this server.' `
-            -Recommendation 'If IBM FlashSystem / Hitachi / HPE XP are integrated, ensure post-migration plug-in versions: IBM FlashSystem >= 2.3.80; Hitachi >= 2.2.271; HPE XP >= 2.2.271.'
+            -Recommendation 'If IBM FlashSystem / Hitachi / HPE XP / NEC Storage V Series are integrated, ensure post-migration plug-in versions: IBM FlashSystem >= 2.3.80; Hitachi >= 2.2.271; HPE XP >= 2.2.271; NEC Storage V Series >= 2.2.271.'
     }
 
     $hosts = @(Get-PrecheckCached -Key 'StoragePluginHosts' -Getter { Get-StoragePluginHost -ErrorAction SilentlyContinue })
     if ($hosts.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'The Universal Storage Plugin inventory on this server was read successfully and contains no systems, so no IBM FlashSystem, Hitachi or HPE XP plug-in version applies.'
+            -Detail 'The Universal Storage Plugin inventory on this server was read successfully and contains no systems, so no IBM FlashSystem, Hitachi, HPE XP or NEC Storage V Series plug-in version applies.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
         -Detail "$($hosts.Count) Universal Storage Plugin system(s) detected. These have minimum plug-in versions on the VSA." `
-        -Recommendation 'After migration ensure: IBM FlashSystem plug-in >= 2.3.80; Hitachi plug-in >= 2.2.271; HPE XP plug-in >= 2.2.271.' `
+        -Recommendation 'After migration ensure: IBM FlashSystem plug-in >= 2.3.80; Hitachi plug-in >= 2.2.271; HPE XP plug-in >= 2.2.271; NEC Storage V Series plug-in >= 2.2.271.' `
         -Evidence ($hosts | ForEach-Object { "Storage plugin host: $($_.Name)" })
 }
 
@@ -1818,8 +1818,12 @@ function Test-NimbleFips {
 #  * Runs best ON the VBR server itself (default -Server localhost) - the richest
 #    and most reliable place to read configuration. Remote works too if the
 #    console/module is installed locally and the account can authenticate.
-#  * v13's module requires PowerShell 7.0+. PowerShell 5.1 / ISE will fail to
-#    import Veeam.Backup.PowerShell - we fail fast with a clear message.
+#  * v13's module requires PowerShell **7.6** - its own manifest sets that minimum
+#    and the import fails outright below it. Checking only the major version let
+#    7.4 through, and the resulting error names the MODULE, which reads as "Veeam
+#    is not installed" when the real cause is the PowerShell version. Worse, once
+#    the import fails Connect-VBRServer does not exist either, so the next error
+#    compounds the misdirection. Fail fast, and say which it is.
 #  * Connect-VBRServer against a Windows VBR uses the classic path (no port
 #    switch needed). This tool targets the WINDOWS source server, NOT the VSA
 #    appliance - do not point it at a v13 appliance (that would need :443 Identity
@@ -1832,8 +1836,9 @@ function Connect-VbrPrecheck {
         [PSCredential] $Credential
     )
 
-    if ($PSVersionTable.PSVersion.Major -lt 7) {
-        throw "PowerShell 7.0+ is required (Veeam.Backup.PowerShell will not load under $($PSVersionTable.PSVersion)). Run this from 'pwsh', not Windows PowerShell / ISE."
+    $minPowerShell = [version] '7.6'
+    if ($PSVersionTable.PSVersion -lt $minPowerShell) {
+        throw "PowerShell $minPowerShell or later is required: the Veeam v13 module refuses to load under $($PSVersionTable.PSVersion). That minimum is set by the Veeam module itself, not by this tool. Upgrade PowerShell, then run this from 'pwsh' - not Windows PowerShell or ISE."
     }
 
     Write-PrecheckLog "Importing Veeam.Backup.PowerShell module..." -Level STEP
@@ -1841,7 +1846,7 @@ function Connect-VbrPrecheck {
         Import-Module Veeam.Backup.PowerShell -DisableNameChecking -ErrorAction Stop -Verbose:$false
     }
     catch {
-        throw "Could not import Veeam.Backup.PowerShell. Run this on a machine with the VBR v13 console/module installed. Original error: $($_.Exception.Message)"
+        throw "Could not import Veeam.Backup.PowerShell while running PowerShell $($PSVersionTable.PSVersion). Run this on a machine with the VBR v13 console/module installed, on PowerShell $minPowerShell or later. Original error: $($_.Exception.Message)"
     }
 
     # Reuse an existing session if there is one. The Veeam PowerShell Toolkit opens
@@ -1938,6 +1943,11 @@ function Export-PrecheckReport {
             generatedAt   = $generated
             server        = if ($Context) { $Context.Server } else { $null }
             productBuild  = if ($Context) { $Context.ProductString } else { $null }
+            # The Veeam v13 module requires PowerShell 7.6 and will not load below it,
+            # so the host's version is a compatibility fact about the run, not trivia -
+            # and without it a report that behaved oddly cannot be tied to the version
+            # it ran on. The context carries it already; it was simply never emitted.
+            psVersion     = if ($Context -and $Context.PSVersion) { "$($Context.PSVersion)" } else { "$($PSVersionTable.PSVersion)" }
             verdict       = $Verdict.Label
             exitCode      = $Verdict.ExitCode
             counts        = $Verdict.Counts

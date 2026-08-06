@@ -99,24 +99,24 @@ function Test-PreFileToTapeHostname {
 function Test-PreStorageTimezone {
     [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
 
-    # Consideration #8: for Hitachi and HPE XP systems, the timezone set on the
+    # Consideration #8: for Hitachi, HPE XP and NEC Storage V Series systems, the timezone set on the
     # VSA must match the timezone of the Windows machine. Those integrate via the
     # Universal Storage Plugin (Get-StoragePluginHost).
-    $id = 'PRE-004'; $cat = 'Preparation'; $title = 'Appliance timezone (Hitachi / HPE XP)'
+    $id = 'PRE-004'; $cat = 'Preparation'; $title = 'Appliance timezone (Hitachi / HPE XP / NEC)'
 
     if (-not (Test-PrecheckCmdlet 'Get-StoragePluginHost')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Skipped `
-            -Detail 'Hitachi / HPE XP integration could not be checked on this server.'
+            -Detail 'Hitachi / HPE XP / NEC Storage V Series integration could not be checked on this server.'
     }
     $hosts = @(Get-PrecheckCached -Key 'StoragePluginHosts' -Getter { Get-StoragePluginHost -ErrorAction SilentlyContinue })
     if ($hosts.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Skipped `
-            -Detail 'No Universal Storage Plugin (Hitachi/HPE XP) systems detected; timezone-alignment step not applicable.'
+            -Detail 'No Universal Storage Plugin (Hitachi / HPE XP / NEC Storage V Series) systems detected; timezone-alignment step not applicable.'
     }
 
     $tz = try { (Get-TimeZone).Id } catch { 'unknown' }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status NextStep `
-        -Detail "$($hosts.Count) Universal Storage Plugin system(s) present (may include Hitachi / HPE XP). This Windows machine's timezone is '$tz'." `
+        -Detail "$($hosts.Count) Universal Storage Plugin system(s) present (may include Hitachi, HPE XP or NEC Storage V Series). This Windows machine's timezone is '$tz'." `
         -Recommendation "Before/at migration, set the Veeam Software Appliance timezone to match this Windows machine's timezone ('$tz') so Hitachi / HPE XP snapshot scheduling stays aligned." `
         -Evidence ($hosts | ForEach-Object { "Storage plugin host: $($_.Name)" })
 }

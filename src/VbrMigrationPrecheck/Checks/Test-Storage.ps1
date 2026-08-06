@@ -7,7 +7,7 @@
 #   NetApp ONTAP ............. Get-NetAppHost
 #   HPE Nimble / Alletra 5/6k  Get-NimbleHost
 #   Universal Storage Plugin . Get-StoragePluginHost  (IBM FlashSystem, Hitachi,
-#                              HPE XP, Fujitsu, etc.)
+#                              HPE XP, NEC Storage V Series, Fujitsu, etc.)
 #   HPE 3PAR/Primera ......... Get-HP3Storage
 #   Dell VNX ................. Get-VNXHost
 #   Cisco HyperFlex .......... Get-HyperFlexHost
@@ -42,23 +42,23 @@ function Test-StoragePluginVersions {
 
     $id = 'STG-002'; $cat = 'Storage'; $title = 'Universal Storage Plugin versions'
 
-    # IBM FlashSystem, Hitachi and HPE XP all integrate via the Universal Storage
+    # IBM FlashSystem, Hitachi, HPE XP and NEC Storage V Series all integrate via the Universal Storage
     # Plugin -> Get-StoragePluginHost. The cmdlet doesn't split by vendor, so we
     # report presence and the post-migration minimum plug-in versions from KB4800.
     if (-not (Test-PrecheckCmdlet 'Get-StoragePluginHost')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
             -Detail 'Universal Storage Plugin integration could not be checked on this server.' `
-            -Recommendation 'If IBM FlashSystem / Hitachi / HPE XP are integrated, ensure post-migration plug-in versions: IBM FlashSystem >= 2.3.80; Hitachi >= 2.2.271; HPE XP >= 2.2.271.'
+            -Recommendation 'If IBM FlashSystem / Hitachi / HPE XP / NEC Storage V Series are integrated, ensure post-migration plug-in versions: IBM FlashSystem >= 2.3.80; Hitachi >= 2.2.271; HPE XP >= 2.2.271; NEC Storage V Series >= 2.2.271.'
     }
 
     $hosts = @(Get-PrecheckCached -Key 'StoragePluginHosts' -Getter { Get-StoragePluginHost -ErrorAction SilentlyContinue })
     if ($hosts.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail 'The Universal Storage Plugin inventory on this server was read successfully and contains no systems, so no IBM FlashSystem, Hitachi or HPE XP plug-in version applies.'
+            -Detail 'The Universal Storage Plugin inventory on this server was read successfully and contains no systems, so no IBM FlashSystem, Hitachi, HPE XP or NEC Storage V Series plug-in version applies.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
         -Detail "$($hosts.Count) Universal Storage Plugin system(s) detected. These have minimum plug-in versions on the VSA." `
-        -Recommendation 'After migration ensure: IBM FlashSystem plug-in >= 2.3.80; Hitachi plug-in >= 2.2.271; HPE XP plug-in >= 2.2.271.' `
+        -Recommendation 'After migration ensure: IBM FlashSystem plug-in >= 2.3.80; Hitachi plug-in >= 2.2.271; HPE XP plug-in >= 2.2.271; NEC Storage V Series plug-in >= 2.2.271.' `
         -Evidence ($hosts | ForEach-Object { "Storage plugin host: $($_.Name)" })
 }
 

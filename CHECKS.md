@@ -23,7 +23,7 @@ against a real environment (see the caveat at the bottom).
 | AGT-003 | Agents | Mac agent domain accounts must become local (no Kerberos/NTLM) | `Get-VBRComputerBackupJob` | Pass / Manual | Low - mock-tested; platform vocabulary still unconfirmed |
 | AGT-004 | Agents | Post-migration: rescan all PGs; pre-installed-agent PGs need new config file. Keyed on `Container.Type -eq ManuallyDeployed` — see note | `Get-VBRProtectionGroup` | Pass / Manual | High — validated |
 | STG-001 | Storage | NetApp ONTAP: only NAS filer role migrates | `Get-NetAppHost` (no VBR prefix) | Pass / Warning / Info | Medium - mock-tested |
-| STG-002 | Storage | IBM/Hitachi/HPE XP plug-in minimum versions post-migration | `Get-StoragePluginHost` (no VBR prefix) | Pass / Manual / Info | Medium - mock-tested |
+| STG-002 | Storage | IBM / Hitachi / HPE XP / **NEC Storage V Series** plug-in minimum versions post-migration | `Get-StoragePluginHost` (no VBR prefix) | Pass / Manual / Info | Medium - mock-tested |
 | STG-003 | Storage | HPE Nimble/Alletra: some Nimble OS versions may be unsupported when the **Linux-based** backup server runs FIPS-compliant mode — see note. Status is conditional on `FipsCompliantModeEnabled` | `Get-NimbleHost`, `Get-VBRSecurityOptions` | Pass / Manual / Warning / Info | Medium - mock-tested; a Nimble-integrated server is booked for w/c 2026-08-10 |
 | JOB-001 | Jobs | CDP job config not migrated (manual re-create) | `Get-VBRCDPPolicy` | Pass / Warning / Info | Medium - mock-tested |
 | JOB-002 | Jobs | SureBackup SQL Server Checker Script fails on VSA | `Get-VBRApplicationGroup` | Pass / Blocker / Manual | High — both paths validated |
@@ -49,7 +49,7 @@ v13, #7 local repo accounts are already enforced as limitation checks above.)
 | PRE-001 | Configure a secondary target for Entra ID tenant backups first | `Get-VBREntraIDTenant` (→ `New-/Set-VBREntraIDBackupSecondaryTarget`) | NextStep / Skipped |
 | PRE-002 | Verify all managed machines are reachable from the VSA (net/FW/DNS) | `Get-VBRServer` | NextStep (always) |
 | PRE-003 | File-to-tape: use the source server **short** hostname, resolvable | `Get-VBRTapeJob` | NextStep / Skipped |
-| PRE-004 | Match VSA timezone to this Windows machine (Hitachi / HPE XP) | `Get-StoragePluginHost` + `Get-TimeZone` | NextStep / Skipped |
+| PRE-004 | Match VSA timezone to this Windows machine (Hitachi / HPE XP / NEC) | `Get-StoragePluginHost` + `Get-TimeZone` | NextStep / Skipped |
 
 > **On DB-001's date (`-UpgradeDate`): supply the date this environment was upgraded
 > to v12.** That is the boundary that matters, because **what breaks migration is
