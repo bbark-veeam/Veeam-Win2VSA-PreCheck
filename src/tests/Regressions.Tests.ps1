@@ -35,6 +35,8 @@ BeforeAll {
     $global:MockLicense     = $null
     $global:MockHistory     = $null
     $global:MockSecurityOptions = $null
+    $global:MockServers     = @()
+    $global:MockTapeJobs    = @()
     $global:MockCloudTenants  = @()
     $global:MockCloudGateways = @()
 
@@ -62,6 +64,8 @@ BeforeAll {
     function global:Get-VBRInstalledLicense       { param($ErrorAction) Assert-MockOk 'Get-VBRInstalledLicense'; $global:MockLicense }
     function global:Get-VBRHistoryOptions        { param($ErrorAction) Assert-MockOk 'Get-VBRHistoryOptions'; $global:MockHistory }
     function global:Get-VBRSecurityOptions       { param($ErrorAction) Assert-MockOk 'Get-VBRSecurityOptions'; $global:MockSecurityOptions }
+    function global:Get-VBRServer                { param($ErrorAction, $Type) Assert-MockOk 'Get-VBRServer'; $global:MockServers }
+    function global:Get-VBRTapeJob               { param($ErrorAction) Assert-MockOk 'Get-VBRTapeJob'; $global:MockTapeJobs }
     # DB-001 reads the retention SETTING, never the sessions. This stub fails loudly if
     # anything reaches for the sessions again: the cmdlet has no date filter and no
     # ordering, so touching it materialises every session on the server - the original
@@ -109,7 +113,14 @@ BeforeAll {
         $global:MockPluginHosts = @(); $global:MockNimble = @(); $global:MockCreds = @()
         $global:MockThrow = @()
         $global:MockLicense = $null; $global:MockHistory = $null; $global:MockSecurityOptions = $null
+        $global:MockServers = @(); $global:MockTapeJobs = @()
         $global:MockCloudTenants = @(); $global:MockCloudGateways = @()
+    }
+
+    # ENV-001 reads nothing but the context, so it is driven by supplying one.
+    function Invoke-CheckWithContext {
+        param([string] $Name, $Context)
+        & $script:Mod ([scriptblock]::Create("param(`$c) $Name -Ctx `$c")) $Context
     }
 
     # DB-001 is the only check taking a parameter beyond -Ctx, so it needs its own invoker.
@@ -1030,5 +1041,181 @@ Describe 'STG-003 Nimble under FIPS-compliant mode' {
         $r = Invoke-Check 'Test-NimbleFips'
         $r.Detail | Should -Match '2 HPE Nimble/Alletra system'
         ($r.Evidence -join ';') | Should -Match 'alletra-6000-a'
+    }
+}
+
+# --------------------------------------------------------------------------------
+# The last seven checks, closing G1. None of these needed lab hardware; all are
+# driven by mocked cmdlets or by the context object alone.
+# --------------------------------------------------------------------------------
+
+Describe 'ENV-001 source VBR version' {
+    BeforeEach { Reset-MockState }
+
+    # Validated live in both directions already (13.1 -> Blocker, 13.0.2 -> Pass). These
+    # exist for the branches a live run cannot reach without installing that build, and
+    # to stop an edit quietly changing a hard-coded rule.
+    #
+    # Contexts are built inline: Pester 6 does not make a function defined in a Describe
+    # body visible inside its It blocks, the same scoping rule noted in the harness.
+
+    It 'passes the supported 13.0.x train' {
+        $ctx = [pscustomobject]@{ Server = 'localhost'; ProductBuild = [version]'13.0.2.29'; ProductString = 'Veeam Backup & Replication 13.0.2.29' }
+        $r = Invoke-CheckWithContext 'Test-VbrVersion' $ctx
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'within the supported 13.0.x train'
+    }
+
+    It 'blocks on 13.1' {
+        $ctx = [pscustomobject]@{ Server = 'localhost'; ProductBuild = [version]'13.1.0.411'; ProductString = 'Veeam Backup & Replication 13.1.0.411' }
+        $r = Invoke-CheckWithContext 'Test-VbrVersion' $ctx
+        $r.Status | Should -Be 'Blocker'
+        $r.Detail | Should -Match 'NOT possible'
+    }
+
+    It 'asks for an upgrade below 13.0' {
+        $ctx = [pscustomobject]@{ Server = 'localhost'; ProductBuild = [version]'12.3.1.1139'; ProductString = 'Veeam Backup & Replication 12.3.1.1139' }
+        $r = Invoke-CheckWithContext 'Test-VbrVersion' $ctx
+        $r.Status | Should -Be 'Action'
+        $r.Detail | Should -Match 'older than 13.0'
+    }
+
+    # DELIBERATE, and confirmed by Brad 2026-08-06: "Versions >13.1 are still an unknown
+    # so we shouldn't pre-code whether migration will be an option with them until closer
+    # to their releases." A newer build therefore defers to KB4800 rather than being
+    # guessed in either direction. Changing this to Pass is a decision to be taken when
+    # the release actually exists - not a bug to be fixed.
+    It 'makes no claim about a build newer than 13.1' {
+        $ctx = [pscustomobject]@{ Server = 'localhost'; ProductBuild = [version]'13.2.0.100'; ProductString = 'Veeam Backup & Replication 13.2.0.100' }
+        $r = Invoke-CheckWithContext 'Test-VbrVersion' $ctx
+        $r.Status | Should -Be 'Manual'
+        $r.Status | Should -Not -Be 'Pass'
+        $r.Status | Should -Not -Be 'Blocker'
+        $r.Recommendation | Should -Match 'KB4800'
+    }
+
+    It 'reports Info when the build could not be resolved' {
+        $ctx = [pscustomobject]@{ Server = 'localhost'; ProductBuild = $null; ProductString = 'something unparseable' }
+        $r = Invoke-CheckWithContext 'Test-VbrVersion' $ctx
+        $r.Status | Should -Be 'Info'
+        $r.Detail | Should -Match 'Could not resolve'
+    }
+}
+
+Describe 'SEC-001 four-eyes authorization' {
+    BeforeEach { Reset-MockState }
+
+    # Permanently Manual: the state is not exposed to PowerShell at all, so no
+    # environment changes this. The test exists so nobody quietly turns it into a Pass.
+    It 'always defers, and names the console path to check' {
+        $r = Invoke-Check 'Test-FourEyes'
+        $r.Status | Should -Be 'Manual'
+        $r.Status | Should -Not -Be 'Pass'
+        $r.Recommendation | Should -Match 'Users & Roles'
+        $r.Recommendation | Should -Match 'Authorization'
+    }
+
+    # Customer-facing text describes the environment, not our tooling.
+    It 'does not name a cmdlet in its detail' {
+        (Invoke-Check 'Test-FourEyes').Detail | Should -Not -Match 'Get-VBR'
+    }
+}
+
+Describe 'SEC-003 trusted-domain authentication' {
+    BeforeEach { Reset-MockState }
+
+    It 'always defers, and states the appliance limitation' {
+        $r = Invoke-Check 'Test-TrustedDomainAuth'
+        $r.Status | Should -Be 'Manual'
+        $r.Status | Should -Not -Be 'Pass'
+        $r.Detail | Should -Match 'trusted-domain authentication'
+    }
+
+    It 'does not name a cmdlet in its detail' {
+        (Invoke-Check 'Test-TrustedDomainAuth').Detail | Should -Not -Match 'Get-VBR'
+    }
+}
+
+Describe 'PRE-001 Entra ID secondary target' {
+    BeforeEach { Reset-MockState }
+
+    It 'raises a next step when a tenant backup exists' {
+        $global:MockTenants = @([pscustomobject]@{ Name = 'contoso.onmicrosoft.com' })
+        $r = Invoke-Check 'Test-PreEntraIdSecondaryTarget'
+        $r.Status | Should -Be 'NextStep'
+        ($r.Evidence -join ';') | Should -Match 'contoso'
+    }
+
+    # A conditional consideration stays silent when its feature is absent, so a next step
+    # only ever appears when it actually applies.
+    It 'stays silent when no tenant backups exist' {
+        (Invoke-Check 'Test-PreEntraIdSecondaryTarget').Status | Should -Be 'Skipped'
+    }
+}
+
+Describe 'PRE-002 machine reachability' {
+    BeforeEach { Reset-MockState }
+
+    # Always a next step: it cannot be tested from the Windows source, because the
+    # appliance does not exist yet. Validated live - the lab run rendered 3 servers.
+    It 'always raises a next step, counting the managed servers' {
+        $global:MockServers = @(
+            [pscustomobject]@{ Name = 'proxy01.corp.local'; Type = 'Windows' }
+            [pscustomobject]@{ Name = 'repo01.corp.local';  Type = 'Linux' }
+        )
+        $r = Invoke-Check 'Test-PreMachineAccessibility'
+        $r.Status | Should -Be 'NextStep'
+        $r.Detail | Should -Match '2 managed server'
+        ($r.Evidence -join ';') | Should -Match 'proxy01.corp.local'
+    }
+
+    It 'still raises the next step when no servers are registered' {
+        (Invoke-Check 'Test-PreMachineAccessibility').Status | Should -Be 'NextStep'
+    }
+}
+
+Describe 'PRE-003 file-to-tape source hostname' {
+    BeforeEach { Reset-MockState }
+
+    It 'raises a next step for a file-to-tape job, naming the short hostname' {
+        $global:MockTapeJobs = @([pscustomobject]@{ Name = 'Nightly file archive'; Type = 'FileToTape'; TypeToString = 'File to tape' })
+        $r = Invoke-Check 'Test-PreFileToTapeHostname'
+        $r.Status | Should -Be 'NextStep'
+        ($r.Evidence -join ';') | Should -Match 'Nightly file archive'
+        # $env:COMPUTERNAME is BACKUP01 in this harness.
+        $r.Recommendation | Should -Match 'BACKUP01'
+    }
+
+    # Same bare-substring hazard as the AGT-003 'Mac' bug, which matched the word
+    # "machine": this matches 'File' across the type strings, so a backup-to-tape job
+    # whose type mentions a file must not be reported as file-to-tape.
+    It 'does not treat a backup-to-tape job as file-to-tape' {
+        $global:MockTapeJobs = @([pscustomobject]@{ Name = 'VM backup to tape'; Type = 'BackupToTape'; TypeToString = 'Backup to tape' })
+        (Invoke-Check 'Test-PreFileToTapeHostname').Status | Should -Be 'Skipped'
+    }
+
+    It 'stays silent when there are no tape jobs at all' {
+        (Invoke-Check 'Test-PreFileToTapeHostname').Status | Should -Be 'Skipped'
+    }
+}
+
+Describe 'PRE-004 appliance timezone' {
+    BeforeEach { Reset-MockState }
+
+    # The timezone is read from the machine running the test, so assert the value the
+    # check actually reported rather than a fixed ID, which differs per machine and per
+    # CI runner.
+    It 'raises a next step naming this machine timezone when a plug-in system exists' {
+        $global:MockPluginHosts = @([pscustomobject]@{ Name = 'hitachi-01' })
+        $tz = (Get-TimeZone).Id
+        $r = Invoke-Check 'Test-PreStorageTimezone'
+        $r.Status | Should -Be 'NextStep'
+        $r.Detail | Should -Match ([regex]::Escape($tz))
+        $r.Recommendation | Should -Match ([regex]::Escape($tz))
+        ($r.Evidence -join ';') | Should -Match 'hitachi-01'
+    }
+
+    It 'stays silent when no Universal Storage Plugin system is present' {
+        (Invoke-Check 'Test-PreStorageTimezone').Status | Should -Be 'Skipped'
     }
 }

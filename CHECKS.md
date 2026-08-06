@@ -17,7 +17,7 @@ against a real environment (see the caveat at the bottom).
 | ENV-002 | Environment | VSA supports only instance-based VUL; socket must convert | `Get-VBRInstalledLicense` | Pass / Action / Info | High — instance path validated live; socket path shape-confirmed by reflection, values synthetic (socket licensing is deprecated, so a socket licence cannot be obtained to test) |
 | DEP-001 | Deployment | Cloud Connect deployments cannot migrate. Read from the licence itself (`.CloudConnect` = Enabled/Disabled/Enterprise/Invalid); tenants and gateways enrich the evidence | `Get-VBRInstalledLicense`, `Get-VBRCloudTenant`, `Get-VBRCloudGateway` | Pass / Blocker / Info | High — Disabled path validated live; the Cloud Connect modes are mock-tested pending a provider licence |
 | DEP-002 | Deployment | Google Cloud plug-in config will not migrate (Windows-only). Detected from CONFIGURATION (`Get-VBRGoogleCloudAccount`, `Get-VBRGoogleCloudComputeAccount`) plus a job-name signal. The plug-in ships with VBR so installation proves nothing; external repositories are not examined | `Get-VBRGoogleCloud*Account`, `Get-VBRJob` | Pass / Warning / Manual | Medium |
-| DEP-003 | Deployment | Entra ID tenant backup **data** not migrated | `Get-VBREntraIDTenant` | Pass / Manual / Info | Medium - mock-tested |
+| DEP-003 | Deployment | Entra ID tenant backup **data** not migrated | `Get-VBREntraIDTenant` | Pass / Manual / Info | Medium — mock-tested |
 | AGT-001 | Agents | All agents must be v13+ to connect | `Get-VBRDiscoveredComputer` | Pass / Action / Manual | High — validated |
 | AGT-002 | Agents | Disabled agent policies must be applied/synced first. Keyed on `JobEnabled` (NOT `IsEnabled`, which does not exist; NOT `ScheduleEnabled`, which is a different thing). Whether config was applied is not exposed at all — see note | `Get-VBRComputerBackupJob` | Pass / Action / Info | High — validated |
 | AGT-003 | Agents | Mac agent domain accounts must become local (no Kerberos/NTLM) | `Get-VBRComputerBackupJob` | Pass / Manual | Low - mock-tested; platform vocabulary still unconfirmed |
@@ -28,9 +28,9 @@ against a real environment (see the caveat at the bottom).
 | JOB-001 | Jobs | CDP job config not migrated (manual re-create) | `Get-VBRCDPPolicy` | Pass / Warning / Info | Medium - mock-tested |
 | JOB-002 | Jobs | SureBackup SQL Server Checker Script fails on VSA | `Get-VBRApplicationGroup` | Pass / Blocker / Manual | High — both paths validated |
 | JOB-003 | Jobs | Pre/post-job + pre-freeze/post-thaw scripts & CSVs copied manually. Reads all three surfaces — see note below. CSV files remain undetectable and are named as such | `Get-VBRJob`, `Get-VBRJobObject` | Pass / Manual | High — validated |
-| SEC-001 | Security | Four-eyes authorization disabled during migration | none exists → manual | Manual | n/a |
+| SEC-001 | Security | Four-eyes authorization disabled during migration | none exists → manual | Manual | n/a — permanently manual; a test pins it so it cannot become a Pass |
 | SEC-002 | Security | Non-UPN **Standard** credentials to review for Kerberos-authenticated connections | `Get-VBRCredentials` | Pass / Manual | Medium — see note |
-| SEC-003 | Security | Trusted-domain authentication unsupported | (manual) | Manual | n/a |
+| SEC-003 | Security | Trusted-domain authentication unsupported | (manual) | Manual | n/a — permanently manual; a test pins it so it cannot become a Pass |
 | SEC-004 | Security | Local (non-domain) repo access accounts → "SID not found" | `Get-VBREPPermission` -Repository → `.Users` | Pass / Action / Manual / Info | High — validated, both the flagging and the clean path |
 | SEC-005 | Security | Console role assignments must be UPN (appliance console login) — see note | `Get-VBRUserRoleAssignment` | Pass / Action / Manual | High — validated live: all three source shapes flagged with distinct reasons, and both appliance remediation forms confirmed on real appliances |
 | DB-001 | Job history | Job-history sessions predating the **upgrade to v12** fail migration (the limiting factor is v11-and-earlier session data) | `Get-VBRHistoryOptions` | Pass / Action / Manual / Info | High — Pass and Action both validated live |
@@ -347,7 +347,10 @@ The three ratings mean different things, and the difference matters:
   AGT-003 fall here. A mocked shape proves the logic does what it intends; it
   cannot prove the shape matches the product. Treat the *property and value
   vocabulary* of these checks as unconfirmed.
-- neither — the logic has not been exercised in either direction.
+- neither — the logic has not been exercised in either direction. **No check is currently in this state:
+  all 25 are exercised by the test suite in both directions.** That
+  raises the floor; it does not by itself raise any row's rating, because a mocked shape
+  still cannot prove the shape matches the product.
 
 **Why the distinction is not pedantic:** of the property probes this tool has
 written against an unvalidated object shape, **four of five turned out to be

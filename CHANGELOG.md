@@ -14,6 +14,20 @@ produces.
 
 ## [Unreleased]
 ### Added
+- **G1 is complete: all 25 checks are now exercised by the suite, in both directions.**
+  The last seven needed no lab hardware — PRE-001..004, ENV-001, SEC-001 and SEC-003 are
+  driven by mocked cmdlets or by the context object alone. 143 tests in the development
+  tree, 122 of them shipped; 14 further mutations, all caught.
+- **ENV-001's "no claim about an unreleased build" is now pinned by a test.** Anything
+  newer than 13.1 returns `Manual`, and the test asserts it is neither `Pass` nor
+  `Blocker`, so a future edit cannot pre-judge a release that does not exist yet.
+- **PRE-003 has the same bare-substring shape as the AGT-003 defect** — it matches `File`
+  across the tape job's type strings — so it now has a negative case proving a
+  backup-to-tape job is not reported as file-to-tape.
+- **SEC-001 and SEC-003 are pinned as permanently `Manual`.** Neither has an input to get
+  wrong, so the tests exist only to stop an edit turning a deferral into a clean result.
+- PRE-004 asserts the timezone the check actually reported rather than a fixed ID, which
+  varies by machine and by CI runner.
 ### Changed
 ### Fixed
 
