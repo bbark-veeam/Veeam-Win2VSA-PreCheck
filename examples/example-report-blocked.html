@@ -37,13 +37,13 @@
   <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
   <div class="meta">Server: BACKUP02.corp.local &nbsp;|&nbsp;
     Build: Veeam Backup &amp; Replication 13.1.0.411 &nbsp;|&nbsp;
-    Generated: 2026-08-06 18:08:01 -04:00 &nbsp;|&nbsp;
-    Precheck version: 0.7.3 &nbsp;|&nbsp;
+    Generated: 2026-08-06 18:28:46 -04:00 &nbsp;|&nbsp;
+    Precheck version: 0.8.0 &nbsp;|&nbsp;
     Reference: KB4800 (captured 2026-07-24)</div>
 </header>
 <div class="wrap">
   <div class="verdict">MIGRATION BLOCKED</div>
-  <div class="counts">25 checks &nbsp;&bull;&nbsp; Blocker 3 &nbsp;&bull;&nbsp; Action 5 &nbsp;&bull;&nbsp; Warning 2 &nbsp;&bull;&nbsp; Manual 6 &nbsp;&bull;&nbsp; NextStep 2 &nbsp;&bull;&nbsp; Info 0 &nbsp;&bull;&nbsp; Pass 5 &nbsp;&bull;&nbsp; Skipped 2</div>
+  <div class="counts">26 checks &nbsp;&bull;&nbsp; Blocker 3 &nbsp;&bull;&nbsp; Action 5 &nbsp;&bull;&nbsp; Warning 2 &nbsp;&bull;&nbsp; Manual 7 &nbsp;&bull;&nbsp; NextStep 2 &nbsp;&bull;&nbsp; Info 0 &nbsp;&bull;&nbsp; Pass 5 &nbsp;&bull;&nbsp; Skipped 2</div>
   <div class="card">
     <table>
       <thead><tr><th>Status</th><th>ID</th><th>Check</th><th>Category</th></tr></thead>
@@ -166,6 +166,17 @@
     <div class="detail">2 Protection Group(s) present. After migration ALL Protection Groups must be rescanned. 1 group(s) appear to use Computers with Pre-installed Backup Agents, which must be reconfigured with a NEW configuration file.</div>
     <div class='rec'>&#8594; Post-migration: rescan every Protection Group. Protection Groups for Computers with Pre-installed Backup Agents must be reconfigured with a new configuration file.</div>
     <ul class='ev'><li>Protection Group: Office workstations  [ActiveDirectory]</li><li>Protection Group: Remote laptops  [ManuallyDeployed]</li></ul>
+  </td>
+  <td class="cat">Agents</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">AGT-005</td>
+  <td>
+    <div class="title">Active Directory protection group LDAP port</div>
+    <div class="detail">The Active Directory port could not be read for 1 of 1 Active Directory protection group(s), so whether they use encrypted LDAP is unknown.</div>
+    <div class='rec'>&#8594; Check each protection group below: if it uses port 636 (encrypted LDAP), then after migration open its settings and on the Active Directory tab click Change then OK, so the domain Root CA certificate is pulled into the trusted certificates.</div>
+    <ul class='ev'><li>Protection Group: Office workstations  [Active Directory, port could not be read]</li></ul>
   </td>
   <td class="cat">Agents</td>
 </tr>

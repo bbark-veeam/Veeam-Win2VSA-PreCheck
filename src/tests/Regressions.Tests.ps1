@@ -1585,3 +1585,84 @@ Describe 'Appliance role-assignment remediation script' {
         & $script:Mod ([scriptblock]::Create('param($p) Export-PrecheckRoleAssignmentScript -Path $p')) $script:OutFile | Should -BeNullOrEmpty
     }
 }
+
+Describe 'AGT-005 Active Directory protection group LDAP port' {
+    BeforeEach { Reset-MockState }
+
+    # Property path confirmed on a real group: Container (VBRADContainer) -> Domain
+    # (VBRADDomain) -> Port, reading 389 by default. Port 636 has to be entered by hand.
+    # The 636 case is mock-tested: reproducing it needs LDAPS on a domain controller,
+    # which is a certificate deployment rather than a setting.
+    It 'flags an Active Directory group using port 636' {
+        $global:MockGroups = @(
+            [pscustomobject]@{ Name = 'AD Objects'; Container = [pscustomobject]@{
+                Type = 'ActiveDirectory'; Domain = [pscustomobject]@{ ServerName = 'dc01.corp.local'; Port = 636 } } }
+        )
+        $r = Invoke-Check 'Test-AdProtectionGroupLdapPort'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match '1 of 1 Active Directory protection group'
+        $r.Recommendation | Should -Match 'Root CA certificate'
+        ($r.Evidence -join ';') | Should -Match 'port 636'
+    }
+
+    # 389 is the default, so flagging every AD group would be noise on servers with
+    # nothing to do.
+    It 'does not flag the default port 389' {
+        $global:MockGroups = @(
+            [pscustomobject]@{ Name = 'AD Objects'; Container = [pscustomobject]@{
+                Type = 'ActiveDirectory'; Domain = [pscustomobject]@{ ServerName = 'dc01.corp.local'; Port = 389 } } }
+        )
+        $r = Invoke-Check 'Test-AdProtectionGroupLdapPort'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match '1 Active Directory protection group\(s\) were examined and none uses port 636'
+    }
+
+    # Exact number, never a substring: 636 inside another figure is the shape that made
+    # AGT-003 match "machine" for "Mac".
+    It 'does not match a port that merely contains 636' {
+        $global:MockGroups = @(
+            [pscustomobject]@{ Name = 'AD Objects'; Container = [pscustomobject]@{
+                Type = 'ActiveDirectory'; Domain = [pscustomobject]@{ ServerName = 'dc01.corp.local'; Port = 6360 } } }
+        )
+        (Invoke-Check 'Test-AdProtectionGroupLdapPort').Status | Should -Be 'Pass'
+    }
+
+    It 'ignores protection groups that are not Active Directory' {
+        $global:MockGroups = @(
+            [pscustomobject]@{ Name = 'Individual'; Container = [pscustomobject]@{ Type = 'IndividualComputers' } }
+            [pscustomobject]@{ Name = 'Preinstalled'; Container = [pscustomobject]@{ Type = 'ManuallyDeployed' } }
+        )
+        $r = Invoke-Check 'Test-AdProtectionGroupLdapPort'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match '2 protection group\(s\) were examined and none is an Active Directory group'
+    }
+
+    It 'defers when the port cannot be read on an Active Directory group' {
+        $global:MockGroups = @(
+            [pscustomobject]@{ Name = 'AD Objects'; Container = [pscustomobject]@{
+                Type = 'ActiveDirectory'; Domain = [pscustomobject]@{ ServerName = 'dc01.corp.local' } } }
+        )
+        $r = Invoke-Check 'Test-AdProtectionGroupLdapPort'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be read'
+    }
+
+    # Same fail-open shape fixed elsewhere: an unread collection is empty, and empty
+    # must not become a clean result.
+    It 'defers rather than passing when the groups cannot be enumerated' {
+        $global:MockThrow = @('Get-VBRProtectionGroup')
+        $r = Invoke-Check 'Test-AdProtectionGroupLdapPort'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be enumerated'
+    }
+
+    It 'handles a group whose Domain is a collection' {
+        $global:MockGroups = @(
+            [pscustomobject]@{ Name = 'Multi'; Container = [pscustomobject]@{ Type = 'ActiveDirectory'; Domain = @(
+                [pscustomobject]@{ ServerName = 'dc01.corp.local'; Port = 389 }
+                [pscustomobject]@{ ServerName = 'dc02.corp.local'; Port = 636 }
+            ) } }
+        )
+        (Invoke-Check 'Test-AdProtectionGroupLdapPort').Status | Should -Be 'Manual'
+    }
+}

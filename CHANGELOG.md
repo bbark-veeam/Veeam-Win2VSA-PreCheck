@@ -50,6 +50,29 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.8.0] - 2026-08-06
+### Added
+- **AGT-005: Active Directory protection groups using port 636.** KB4800 asks for the domain
+  Root CA certificate to be re-pulled after migration for AD protection groups on encrypted
+  LDAP. The check reports only the **636** case — 389 is the default and 636 has to be
+  entered by hand, so flagging every AD group would be noise on servers with nothing to do.
+  Twenty-six checks now.
+- The property path was **confirmed on a real group** rather than guessed:
+  `Container` (`VBRADContainer`) → `Domain` (`VBRADDomain`) → `Port`, reading 389.
+- The port is compared as an **exact number, never a substring** — 636 inside another figure
+  is precisely the shape that had AGT-003 matching "machine" for "Mac". A test covers 6360.
+- Seven cases: port 636, the 389 default, a near-miss port, non-AD groups, an unreadable
+  port, groups that cannot be enumerated, and a `Domain` that is a collection rather than a
+  single object.
+- `Get-VBRProtectionGroup` is now cached, so AGT-004 and AGT-005 share one round-trip.
+
+### Note on evidence
+- The **389 path is validated against a real group**; the **636 path is mock-tested**.
+  Reproducing 636 needs LDAPS configured on a domain controller, which is a certificate
+  deployment rather than a setting — a cost that is not worth paying for a post-migration,
+  non-blocking item. The reference records that split rather than implying both were
+  exercised.
+
 ## [0.7.3] - 2026-08-06
 ### Changed
 - **ENV-001 now names the exact appliance version the target must run.** The source and

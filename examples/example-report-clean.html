@@ -37,13 +37,13 @@
   <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
   <div class="meta">Server: BACKUP01.corp.local &nbsp;|&nbsp;
     Build: Veeam Backup &amp; Replication 13.0.2.29 &nbsp;|&nbsp;
-    Generated: 2026-08-06 18:08:01 -04:00 &nbsp;|&nbsp;
-    Precheck version: 0.7.3 &nbsp;|&nbsp;
+    Generated: 2026-08-06 18:28:45 -04:00 &nbsp;|&nbsp;
+    Precheck version: 0.8.0 &nbsp;|&nbsp;
     Reference: KB4800 (captured 2026-07-24)</div>
 </header>
 <div class="wrap">
   <div class="verdict">REVIEW WARNINGS</div>
-  <div class="counts">25 checks &nbsp;&bull;&nbsp; Blocker 0 &nbsp;&bull;&nbsp; Action 0 &nbsp;&bull;&nbsp; Warning 0 &nbsp;&bull;&nbsp; Manual 2 &nbsp;&bull;&nbsp; NextStep 1 &nbsp;&bull;&nbsp; Info 0 &nbsp;&bull;&nbsp; Pass 19 &nbsp;&bull;&nbsp; Skipped 3</div>
+  <div class="counts">26 checks &nbsp;&bull;&nbsp; Blocker 0 &nbsp;&bull;&nbsp; Action 0 &nbsp;&bull;&nbsp; Warning 0 &nbsp;&bull;&nbsp; Manual 2 &nbsp;&bull;&nbsp; NextStep 1 &nbsp;&bull;&nbsp; Info 0 &nbsp;&bull;&nbsp; Pass 20 &nbsp;&bull;&nbsp; Skipped 3</div>
   <div class="card">
     <table>
       <thead><tr><th>Status</th><th>ID</th><th>Check</th><th>Category</th></tr></thead>
@@ -109,6 +109,17 @@
   <td>
     <div class="title">Protection group post-migration steps</div>
     <div class="detail">The Protection Group list on this server was read successfully and is empty, so no post-migration rescan is needed.</div>
+    
+    
+  </td>
+  <td class="cat">Agents</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">AGT-005</td>
+  <td>
+    <div class="title">Active Directory protection group LDAP port</div>
+    <div class="detail">0 protection group(s) were examined and none is an Active Directory group, so no encrypted-LDAP certificate step applies.</div>
     
     
   </td>

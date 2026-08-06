@@ -188,7 +188,7 @@ function Test-ProtectionGroupPostMigration {
     $readGroups = $false
     if (Test-PrecheckCmdlet 'Get-VBRProtectionGroup') {
         try {
-            $groups = @(Get-VBRProtectionGroup -ErrorAction SilentlyContinue)
+            $groups = @(Get-PrecheckCached -Key 'ProtectionGroups' -Getter { Get-VBRProtectionGroup -ErrorAction SilentlyContinue })
             $readGroups = $true
             foreach ($g in $groups) {
                 $ct = ''
@@ -226,4 +226,93 @@ function Test-ProtectionGroupPostMigration {
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
         -Detail $detail -Recommendation $rec -Evidence $ev
+}
+
+function Test-AdProtectionGroupLdapPort {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
+
+    $id = 'AGT-005'; $cat = 'Agents'; $title = 'Active Directory protection group LDAP port'
+
+    # KB4800: "For Protection Groups for Microsoft Active Directory Objects that use port
+    # 636 (encrypted LDAP), open the Protection Group settings and, on the Active Directory
+    # tab, click Change, then press Ok to have the software pull the domain Root CA
+    # certificate and add it to the trusted certificates."
+    #
+    # Port 389 is the default and 636 has to be entered by hand, so only the 636 case is
+    # reported - flagging every AD protection group would be noise on servers where nothing
+    # needs doing.
+    #
+    # Property path, confirmed on a real group: Container (VBRADContainer) -> Domain
+    # (VBRADDomain) -> Port. Compared as an exact number, never a substring: 636 appearing
+    # inside some other figure is the shape that made AGT-003 match "machine" for "Mac".
+    if (-not (Test-PrecheckCmdlet 'Get-VBRProtectionGroup')) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Protection groups could not be read on this server, so their Active Directory port was not checked.' `
+            -Recommendation 'After migration, for any Protection Group for Microsoft Active Directory Objects using port 636 (encrypted LDAP), open its settings, and on the Active Directory tab click Change then OK so the domain Root CA certificate is pulled into the trusted certificates.'
+    }
+
+    $groups = @()
+    $readGroups = $false
+    try {
+        $groups = @(Get-PrecheckCached -Key 'ProtectionGroups' -Getter { Get-VBRProtectionGroup -ErrorAction SilentlyContinue })
+        $readGroups = $true
+    } catch { }
+
+    if (-not $readGroups) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Protection groups could not be enumerated on this server, so their Active Directory port was not checked.' `
+            -Recommendation 'After migration, for any Protection Group for Microsoft Active Directory Objects using port 636 (encrypted LDAP), open its settings, and on the Active Directory tab click Change then OK so the domain Root CA certificate is pulled into the trusted certificates.'
+    }
+
+    $adCount    = 0
+    $encrypted  = @()
+    $unreadable = @()
+    $evidence   = @()
+    foreach ($g in $groups) {
+        $ct = ''
+        try { if ($g.Container) { $ct = "$($g.Container.Type)" } } catch { }
+        if ($ct -ine 'ActiveDirectory') { continue }
+        $adCount++
+
+        # Domain may be a single object or a collection; treat both the same way.
+        $ports = @()
+        try {
+            foreach ($d in @($g.Container.Domain)) {
+                if ($null -eq $d) { continue }
+                if ($d.PSObject.Properties['Port'] -and $null -ne $d.Port) {
+                    $n = 0
+                    if ([int]::TryParse("$($d.Port)", [ref]$n)) { $ports += $n }
+                }
+            }
+        } catch { }
+
+        if ($ports.Count -eq 0) {
+            $unreadable += $g.Name
+            $evidence   += "Protection Group: $($g.Name)  [Active Directory, port could not be read]"
+            continue
+        }
+        $evidence += "Protection Group: $($g.Name)  [Active Directory, port $($ports -join ', ')]"
+        if ($ports -contains 636) { $encrypted += $g.Name }
+    }
+
+    if ($encrypted.Count -gt 0) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$($encrypted.Count) of $adCount Active Directory protection group(s) use port 636 (encrypted LDAP). After migration the appliance needs the domain Root CA certificate before it can query them." `
+            -Recommendation 'After migration, open each Protection Group listed below, and on the Active Directory tab click Change then OK. That makes the software pull the domain Root CA certificate and add it to the trusted certificates.' `
+            -Evidence $evidence
+    }
+
+    if ($unreadable.Count -gt 0) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "The Active Directory port could not be read for $($unreadable.Count) of $adCount Active Directory protection group(s), so whether they use encrypted LDAP is unknown." `
+            -Recommendation 'Check each protection group below: if it uses port 636 (encrypted LDAP), then after migration open its settings and on the Active Directory tab click Change then OK, so the domain Root CA certificate is pulled into the trusted certificates.' `
+            -Evidence $evidence
+    }
+
+    $detail = if ($adCount -eq 0) {
+        "$($groups.Count) protection group(s) were examined and none is an Active Directory group, so no encrypted-LDAP certificate step applies."
+    } else {
+        "$adCount Active Directory protection group(s) were examined and none uses port 636, so no encrypted-LDAP certificate step applies."
+    }
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass -Detail $detail -Evidence $evidence
 }
