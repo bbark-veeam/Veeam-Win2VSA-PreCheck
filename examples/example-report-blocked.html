@@ -37,8 +37,8 @@
   <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
   <div class="meta">Server: BACKUP02.corp.local &nbsp;|&nbsp;
     Build: Veeam Backup &amp; Replication 13.1.0.411 &nbsp;|&nbsp;
-    Generated: 2026-08-06 17:17:29 -04:00 &nbsp;|&nbsp;
-    Precheck version: 0.7.1 &nbsp;|&nbsp;
+    Generated: 2026-08-06 17:48:56 -04:00 &nbsp;|&nbsp;
+    Precheck version: 0.7.2 &nbsp;|&nbsp;
     Reference: KB4800 (captured 2026-07-24)</div>
 </header>
 <div class="wrap">
@@ -120,7 +120,7 @@
   <td>
     <div class="title">Repository access accounts</div>
     <div class="detail">1 machine-local account(s) are granted access to a repository. Their SIDs do not exist on the Veeam Software Appliance, so migration reports &#39;SID not found&#39;.</div>
-    <div class='rec'>&#8594; Remove these machine-local accounts from the repository access permissions before migrating, replacing them with domain accounts where the access is still needed.</div>
+    <div class='rec'>&#8594; Remove these machine-local accounts from each repository&#39;s Access Permissions (Backup Infrastructure &gt; Backup Repositories &gt; right-click &gt; Access Permissions) before migrating, replacing them with domain accounts where the access is still needed.</div>
     <ul class='ev'><li>Default Backup Repository: BACKUP02\Administrator  [machine-local account]</li></ul>
   </td>
   <td class="cat">Security</td>
@@ -206,9 +206,9 @@
   <td><span class="pill" style="background:#2980b9">Manual</span></td>
   <td class="mono">SEC-002</td>
   <td>
-    <div class="title">Credential format for Kerberos connections</div>
-    <div class="detail">1 credential(s) use a NetBIOS domain prefix, a machine prefix, or a bare user name. Connections that authenticate with Kerberos - Windows servers added to the backup infrastructure, guest OS processing of Windows VMs, and Windows agent management - need an Active Directory account in user@fqdn or fqdn\user form. A machine-local account cannot authenticate with Kerberos at all.</div>
-    <div class='rec'>&#8594; Review each credential below against where it is used. Where the connection authenticates with Kerberos, re-enter the account as user@fqdn or fqdn\user (a machine-local account must be replaced with a domain account). Credentials used only for vSphere host connections are documented as taking MACHINE\USER or DOMAIN\USER format and do not need changing.</div>
+    <div class="title">Datacenter Credential Formatting</div>
+    <div class="detail">1 Datacenter Credential(s) use a NetBIOS domain prefix, a machine prefix, or a bare user name. Connections that authenticate with Kerberos - Windows servers added to the backup infrastructure, guest OS processing of Windows VMs, and Windows agent management - need an Active Directory account in user@fqdn or fqdn\user form. A machine-local account cannot authenticate with Kerberos at all.</div>
+    <div class='rec'>&#8594; Review each credential below in Datacenter Credentials (main menu &gt; Manage Credentials) against where it is used. Where the connection authenticates with Kerberos, re-enter the account as user@fqdn or fqdn\user (a machine-local account must be replaced with a domain account). Credentials used only for vSphere host connections are documented as taking MACHINE\USER or DOMAIN\USER format and do not need changing.</div>
     <ul class='ev'><li>CORP\svc-veeam  [NetBIOS or machine prefix]  - Guest processing</li></ul>
   </td>
   <td class="cat">Security</td>

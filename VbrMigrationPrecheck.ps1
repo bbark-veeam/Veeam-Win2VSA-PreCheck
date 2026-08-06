@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.7.1
-#  Built   : 2026-08-06 17:17:28
+#  Version : 0.7.2
+#  Built   : 2026-08-06 17:48:56
 #  Sources : 16 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.7.1'
+$script:PrecheckVersion = '0.7.2'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -1412,7 +1412,7 @@ function Test-CredentialUpnFormat {
     [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
 
     $id = 'SEC-002'; $cat = 'Security'
-    $title = 'Credential format for Kerberos connections'
+    $title = 'Datacenter Credential Formatting'
 
     # Reports candidates, prescribes nothing: one credential store feeds surfaces
     # with different documented requirements - vSphere hosts take MACHINE\USER or
@@ -1427,7 +1427,7 @@ function Test-CredentialUpnFormat {
 
     if (-not (Test-PrecheckCmdlet 'Get-VBRCredentials')) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-            -Detail 'Stored credentials could not be read on this server.' `
+            -Detail 'The Datacenter Credentials on this server could not be read.' `
             -Recommendation 'Review manually: connections that authenticate with Kerberos - Windows servers added to the backup infrastructure, guest OS processing of Windows VMs, Windows agent management - need an Active Directory account in user@fqdn or fqdn\user form. Credentials used only for vSphere host connections take MACHINE\USER or DOMAIN\USER format and do not need changing.'
     }
 
@@ -1463,6 +1463,9 @@ function Test-CredentialUpnFormat {
 
             $shape = if ($prefix) { 'NetBIOS or machine prefix' } else { 'bare user name' }
             $desc  = if ($c.PSObject.Properties['Description']) { [string]$c.Description } else { '' }
+            # VBR often defaults a credential's description to its own name; repeating it
+            # reads like a mistake in the report.
+            if ($desc -and ($desc.Trim() -ieq $u.Trim())) { $desc = '' }
             $candidates += "$u  [$shape]$(if ($desc) { "  - $desc" })"
         }
         $readCreds = $true
@@ -1471,7 +1474,7 @@ function Test-CredentialUpnFormat {
     if ($candidates.Count -eq 0) {
         if (-not $readCreds) {
             return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-                -Detail 'The stored credentials on this server could not be enumerated, so their format was not checked.' `
+                -Detail 'The Datacenter Credentials on this server could not be enumerated, so their format was not checked.' `
                 -Recommendation 'Review manually: connections that authenticate with Kerberos - Windows servers added to the backup infrastructure, guest OS processing of Windows VMs, Windows agent management - need an Active Directory account in user@fqdn or fqdn\user form.'
         }
 
@@ -1479,10 +1482,10 @@ function Test-CredentialUpnFormat {
         # servers carry several records VBR created itself, so a bare "all clear"
         # hides whether anything was actually in scope.
         $detail = if ($examined -eq 0) {
-            'The stored credential list on this server was read successfully and is empty.'
+            'The Datacenter Credentials list was read successfully on this server and is empty.'
         }
         else {
-            "$examined stored credential(s) were examined and none uses a NetBIOS domain prefix, a machine prefix, or a bare user name, so nothing needs review for Kerberos-authenticated connections." +
+            "$examined Datacenter Credential(s) were examined and none uses a NetBIOS domain prefix, a machine prefix, or a bare user name, so nothing needs review for Kerberos-authenticated connections." +
             "$(if ($acceptable) { " $acceptable are already in user@fqdn or fqdn\user form." })" +
             "$(if ($setAside)   { " $setAside were set aside as not applying to Kerberos paths (SSH, key, token or managed-service credentials, and 'root' accounts)." })"
         }
@@ -1490,8 +1493,8 @@ function Test-CredentialUpnFormat {
     }
 
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-        -Detail "$($candidates.Count) credential(s) use a NetBIOS domain prefix, a machine prefix, or a bare user name. Connections that authenticate with Kerberos - Windows servers added to the backup infrastructure, guest OS processing of Windows VMs, and Windows agent management - need an Active Directory account in user@fqdn or fqdn\user form. A machine-local account cannot authenticate with Kerberos at all." `
-        -Recommendation 'Review each credential below against where it is used. Where the connection authenticates with Kerberos, re-enter the account as user@fqdn or fqdn\user (a machine-local account must be replaced with a domain account). Credentials used only for vSphere host connections are documented as taking MACHINE\USER or DOMAIN\USER format and do not need changing.' `
+        -Detail "$($candidates.Count) Datacenter Credential(s) use a NetBIOS domain prefix, a machine prefix, or a bare user name. Connections that authenticate with Kerberos - Windows servers added to the backup infrastructure, guest OS processing of Windows VMs, and Windows agent management - need an Active Directory account in user@fqdn or fqdn\user form. A machine-local account cannot authenticate with Kerberos at all." `
+        -Recommendation 'Review each credential below in Datacenter Credentials (main menu > Manage Credentials) against where it is used. Where the connection authenticates with Kerberos, re-enter the account as user@fqdn or fqdn\user (a machine-local account must be replaced with a domain account). Credentials used only for vSphere host connections are documented as taking MACHINE\USER or DOMAIN\USER format and do not need changing.' `
         -Evidence ($candidates | Sort-Object -Unique)
 }
 
@@ -1689,7 +1692,7 @@ function Test-RepositoryLocalAccounts {
     if ($local.Count -gt 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Action `
             -Detail "$($local.Count) machine-local account(s) are granted access to a repository. Their SIDs do not exist on the Veeam Software Appliance, so migration reports 'SID not found'." `
-            -Recommendation 'Remove these machine-local accounts from the repository access permissions before migrating, replacing them with domain accounts where the access is still needed.' `
+            -Recommendation 'Remove these machine-local accounts from each repository''s Access Permissions (Backup Infrastructure > Backup Repositories > right-click > Access Permissions) before migrating, replacing them with domain accounts where the access is still needed.' `
             -Evidence (@($local) + @($review) | Sort-Object -Unique)
     }
     if ($review.Count -gt 0) {

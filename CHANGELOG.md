@@ -50,6 +50,28 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.7.2] - 2026-08-06
+### Changed
+- **SEC-002 is retitled "Datacenter Credential Formatting" and now names the store.** It
+  reported "N credential(s) use a NetBIOS domain prefix…" without saying *which* store, and
+  a reader of the HTML took it for the repository access list — which is a different check,
+  SEC-004. The title now names the subject, the detail counts **Datacenter Credentials**,
+  and the recommendation points at *main menu → Manage Credentials*. The title stays a
+  neutral topic rather than stating the finding, so it still reads correctly on a `Pass` —
+  the same convention adopted when titles phrased as the desired state read backwards on
+  failures. SEC-001 already named its console path this way; SEC-002 and SEC-004 did not.
+- **SEC-004 names the exact location too**: each repository's Access Permissions, reached
+  through Backup Infrastructure → Backup Repositories → right-click → Access Permissions.
+- **Evidence no longer repeats a credential's name as its own description.** VBR commonly
+  defaults the description to the account name, which rendered as
+  `SERVER01\Administrator [NetBIOS or machine prefix] - SERVER01\Administrator` and read like a
+  defect in the report. A description that adds information is still shown.
+
+### Added
+- Tests pinning that both the finding and the clean result name the store, so the location
+  cannot be dropped again in an edit, plus cases for the duplicate-description suppression
+  and for a description that does carry information.
+
 ## [0.7.1] - 2026-08-06
 ### Fixed
 - **Every user line the 0.7.0 generator produced would have failed.** Running it against a

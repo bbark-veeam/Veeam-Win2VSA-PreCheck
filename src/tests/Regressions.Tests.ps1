@@ -609,7 +609,10 @@ Describe 'SEC-002 counted credential review' {
         )
         $r = Invoke-Check 'Test-CredentialUpnFormat'
         $r.Status | Should -Be 'Pass'
-        $r.Detail | Should -Match '2 stored credential\(s\) were examined'
+        $r.Detail | Should -Match '2 Datacenter Credential\(s\) were examined'
+        # Name the store. A reader mistook this check for the repository access list
+        # (SEC-004) because the report never said where these credentials live.
+        $r.Detail | Should -Match 'Datacenter Credential'
         $r.Detail | Should -Match '2 are already in user@fqdn or fqdn\\user form'
     }
 
@@ -639,7 +642,29 @@ Describe 'SEC-002 counted credential review' {
     }
 
     It 'distinguishes an empty credential store from a clean one' {
-        (Invoke-Check 'Test-CredentialUpnFormat').Detail | Should -Match 'read successfully and is empty'
+        (Invoke-Check 'Test-CredentialUpnFormat').Detail | Should -Match 'read successfully on this server and is empty'
+    }
+
+    It 'names where the credentials live, in the finding as well as the clean result' {
+        $global:MockCreds = @([pscustomobject]@{ Name = 'CORP\administrator'; Description = '' })
+        $r = Invoke-Check 'Test-CredentialUpnFormat'
+        $r.Status         | Should -Be 'Manual'
+        $r.Detail         | Should -Match 'Datacenter Credential'
+        $r.Recommendation | Should -Match 'Datacenter Credentials'
+    }
+
+    # VBR often defaults a credential's description to its own name, which rendered as
+    # "NAME [shape] - NAME" and read like a bug in the report.
+    It 'does not repeat the name when the description is identical to it' {
+        $global:MockCreds = @([pscustomobject]@{ Name = 'CORP\svc'; Description = 'CORP\svc' })
+        $ev = (Invoke-Check 'Test-CredentialUpnFormat').Evidence -join ';'
+        $ev | Should -Match 'CORP\\svc'
+        $ev | Should -Not -Match 'CORP\\svc.*-.*CORP\\svc'
+    }
+
+    It 'still shows a description that adds information' {
+        $global:MockCreds = @([pscustomobject]@{ Name = 'CORP\svc'; Description = 'Guest processing account' })
+        ((Invoke-Check 'Test-CredentialUpnFormat').Evidence -join ';') | Should -Match 'Guest processing account'
     }
 }
 
