@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.5.3
-#  Built   : 2026-08-06 10:56:46
+#  Version : 0.5.4
+#  Built   : 2026-08-06 10:58:56
 #  Sources : 15 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.5.3'
+$script:PrecheckVersion = '0.5.4'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -1943,10 +1943,11 @@ function Export-PrecheckReport {
             generatedAt   = $generated
             server        = if ($Context) { $Context.Server } else { $null }
             productBuild  = if ($Context) { $Context.ProductString } else { $null }
-            # The Veeam v13 module requires PowerShell 7.6 and will not load below it,
-            # so the host's version is a compatibility fact about the run, not trivia -
-            # and without it a report that behaved oddly cannot be tied to the version
-            # it ran on. The context carries it already; it was simply never emitted.
+            # The Veeam module sets its own PowerShell minimum and it varies by VBR
+            # build (13.0.2 loads on 7.4.14; 13.1 refuses below 7.6), so the host's
+            # version is a compatibility fact about the run rather than trivia - without
+            # it, a report that behaved oddly cannot be tied to the version it ran on.
+            # The context carries it already; it was simply never emitted.
             psVersion     = if ($Context -and $Context.PSVersion) { "$($Context.PSVersion)" } else { "$($PSVersionTable.PSVersion)" }
             verdict       = $Verdict.Label
             exitCode      = $Verdict.ExitCode

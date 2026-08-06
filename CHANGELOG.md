@@ -31,6 +31,16 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.5.4] - 2026-08-06
+### Fixed
+- A code comment added in 0.5.2 still asserted that "the Veeam v13 module requires
+  PowerShell 7.6" — the same over-generalisation 0.5.3 reverted, left behind in the report
+  exporter. It now states the measured position: the minimum belongs to the module and
+  varies by build (13.0.2 loads on 7.4.14; 13.1 refuses below 7.6).
+
+Version bumped for a comment because it changes the shipped artefact, and two byte-different
+artefacts must never claim the same version — that is what the stamp is for.
+
 ## [0.5.3] - 2026-08-06
 ### Fixed
 - **Reverted the PowerShell 7.6 requirement introduced in 0.5.2, which was wrong and would
