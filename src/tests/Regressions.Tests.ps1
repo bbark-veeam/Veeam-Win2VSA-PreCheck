@@ -1123,6 +1123,25 @@ Describe 'ENV-001 source VBR version' {
         $r.Detail | Should -Match 'within the supported 13.0.x train'
     }
 
+    # The source and target versions must match, and the source build is known here - so
+    # the report names the exact appliance version to deploy rather than leaving the
+    # operator to work it out. Naming it per server matters across an estate where
+    # different servers sit on different patch levels.
+    It 'names the exact appliance version the target must be' {
+        $ctx = [pscustomobject]@{ Server = 'localhost'; ProductBuild = [version]'13.0.2.29'; ProductString = 'VBR 13.0.2.29' }
+        $r = Invoke-CheckWithContext 'Test-VbrVersion' $ctx
+        $r.Detail         | Should -Match 'must be running this same version, 13\.0\.2\.29'
+        $r.Recommendation | Should -Match 'Deploy or update the target Veeam Software Appliance to 13\.0\.2\.29'
+        $r.Recommendation | Should -Match 'must match'
+        # The old wording said "13.0.2 or newer", which contradicts a match requirement.
+        $r.Recommendation | Should -Not -Match 'or newer'
+    }
+
+    It 'carries the matching requirement into the pre-13.0 upgrade advice' {
+        $ctx = [pscustomobject]@{ Server = 'localhost'; ProductBuild = [version]'12.3.1.1139'; ProductString = 'VBR 12.3.1.1139' }
+        (Invoke-CheckWithContext 'Test-VbrVersion' $ctx).Recommendation | Should -Match 'same version - the source and target versions must match'
+    }
+
     It 'blocks on 13.1' {
         $ctx = [pscustomobject]@{ Server = 'localhost'; ProductBuild = [version]'13.1.0.411'; ProductString = 'Veeam Backup & Replication 13.1.0.411' }
         $r = Invoke-CheckWithContext 'Test-VbrVersion' $ctx

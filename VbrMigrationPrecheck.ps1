@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.7.2
-#  Built   : 2026-08-06 17:48:56
+#  Version : 0.7.3
+#  Built   : 2026-08-06 18:08:00
 #  Sources : 16 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.7.2'
+$script:PrecheckVersion = '0.7.3'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -900,7 +900,7 @@ function Test-VbrVersion {
     if (-not $build) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
             -Detail "Could not resolve the installed VBR build (detected string: '$($Ctx.ProductString)')." `
-            -Recommendation 'Confirm manually that the server runs the latest available Veeam Backup & Replication 13.0.x patch. Migration is NOT validated on 13.1 or later.'
+            -Recommendation 'Confirm manually that the server runs the latest available Veeam Backup & Replication 13.0.x patch, and deploy the target Veeam Software Appliance at that same version - the source and target versions must match. Migration is NOT validated on 13.1 or later.'
     }
 
     $detail = "Detected build $build ('$($Ctx.ProductString)')."
@@ -908,12 +908,12 @@ function Test-VbrVersion {
     if ($build.Major -lt 13) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Action `
             -Detail "$detail This is older than 13.0." `
-            -Recommendation 'Upgrade the Windows VBR server to the latest 13.0.x patch before attempting migration.'
+            -Recommendation 'Upgrade the Windows VBR server to the latest 13.0.x patch before attempting migration, then deploy the target Veeam Software Appliance at that same version - the source and target versions must match.'
     }
     if ($build.Major -eq 13 -and $build.Minor -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail "$detail This is within the supported 13.0.x train." `
-            -Recommendation 'Ensure this is the LATEST available 13.0.x patch, and that the target Veeam Software Appliance is 13.0.2 or newer.'
+            -Detail "$detail This is within the supported 13.0.x train. The target Veeam Software Appliance must be running this same version, $build." `
+            -Recommendation "Deploy or update the target Veeam Software Appliance to $build - the source and target versions must match. Confirm first that $build is the latest available 13.0.x patch; if it is not, patch this server and match the appliance to whatever it then reports."
     }
     # Never name or make claims about an unreleased build: this output goes to
     # customers and in-development behaviour can still change. Point at the released

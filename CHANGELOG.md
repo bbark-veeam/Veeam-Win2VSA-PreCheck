@@ -50,6 +50,18 @@ produces.
 ### Changed
 ### Fixed
 
+## [0.7.3] - 2026-08-06
+### Changed
+- **ENV-001 now names the exact appliance version the target must run.** The source and
+  target versions must match, and the source build is already known — so the report says
+  *"The target Veeam Software Appliance must be running this same version, 13.0.2.29"* and
+  the recommendation names that build directly, instead of leaving the operator to work it
+  out. Across an estate where servers sit on different patch levels, that is a per-server
+  answer rather than a rule to apply by hand.
+- The previous wording said the appliance should be **"13.0.2 or newer"**, which contradicts
+  a matching requirement; a test now asserts that phrasing cannot come back. The
+  pre-13.0 and unreadable-build paths carry the same requirement forward.
+
 ## [0.7.2] - 2026-08-06
 ### Changed
 - **SEC-002 is retitled "Datacenter Credential Formatting" and now names the store.** It
