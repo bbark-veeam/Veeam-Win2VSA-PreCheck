@@ -123,8 +123,13 @@ function Test-JobScriptsAndFiles {
     # docs/checks-reference.md for why an earlier version that read only the first
     # returned a clean result on a job with four scripts configured.
     $scripts = @()
+    $readJobs = $false
+    $examined = 0
     try {
-        foreach ($job in @(Get-PrecheckCached -Key 'Jobs' -Getter { Get-VBRJob -ErrorAction SilentlyContinue })) {
+        $allJobs = @(Get-PrecheckCached -Key 'Jobs' -Getter { Get-VBRJob -ErrorAction SilentlyContinue })
+        $readJobs = $true
+        foreach ($job in $allJobs) {
+            $examined++
 
             # --- 1. pre/post-JOB commands (job Advanced settings) --------------
             $jsc = $null
@@ -166,12 +171,29 @@ function Test-JobScriptsAndFiles {
 
     if ($scripts.Count -gt 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-            -Detail "$($scripts.Count) script reference(s) found. These files are NOT copied by migration." `
+            -Detail "$($scripts.Count) script reference(s) found across $examined job(s). These files are NOT copied by migration." `
             -Recommendation 'Copy each script to the Veeam Software Appliance manually and update the job settings (paths) after migration. Also confirm whether any job reads a CSV file - those are not detectable here and are not copied either.' `
             -Evidence $scripts
     }
-    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No scripts are configured on any job - pre/post-job commands, job-level guest scripts, and per-machine guest script overrides were all checked. CSV files read by a job cannot be detected; confirm those by hand.'
+
+    # An unread collection is empty, and the clean result below used to be reached by
+    # falling through it - so a throwing job query produced "No scripts are configured on
+    # any job ... were all checked", a confident statement about three surfaces none of
+    # which had been read. Every other check of this shape degrades instead.
+    if (-not $readJobs) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'The job list could not be enumerated on this server, so no job was examined for scripts.' `
+            -Recommendation 'Check by hand whether any job uses pre/post-job commands, pre-freeze/post-thaw guest scripts, or a CSV file. None of those files is copied by migration - copy them to the Veeam Software Appliance manually and update the paths afterward.'
+    }
+
+    # The denominator is what makes this clean result checkable: "no scripts" reads the
+    # same whether every job was examined or the list came back short.
+    $detail = if ($examined -eq 0) {
+        'The job list on this server was read successfully and is empty, so there is no job script to copy.'
+    } else {
+        "None of the $examined job(s) on this server has a script configured - pre/post-job commands, job-level guest scripts, and per-machine guest script overrides were all checked. CSV files read by a job cannot be detected; confirm those by hand."
+    }
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass -Detail $detail
 }
 
 # Pulls the configured script paths out of a CGuestScriptsOptions, for either the

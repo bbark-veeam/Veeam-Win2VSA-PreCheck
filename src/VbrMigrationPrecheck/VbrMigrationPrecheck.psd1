@@ -1,6 +1,6 @@
 @{
     RootModule        = 'VbrMigrationPrecheck.psm1'
-    ModuleVersion     = '0.8.1'
+    ModuleVersion     = '0.8.2'
     GUID              = 'b7e2c1a4-8f3d-4a6e-9c21-5d0f7a2b9e10'
     Author            = 'Brad Barker'
     CompanyName       = 'Veeam'
@@ -27,9 +27,12 @@
     PrivateData = @{
         PSData = @{
             Tags         = @('Veeam', 'VBR', 'VSA', 'Migration', 'Precheck', 'KB4800')
-            LicenseUri   = ''
-            ProjectUri   = ''
-            ReleaseNotes = 'Initial scaffold: KB4800 known-limitation checks for Windows VBR -> VSA migration.'
+            LicenseUri   = 'https://github.com/bbark-veeam/Veeam-Win2VSA-PreCheck/blob/main/LICENSE'
+            ProjectUri   = 'https://github.com/bbark-veeam/Veeam-Win2VSA-PreCheck'
+            # Kept as a pointer rather than a copy: CHANGELOG.md is the record, and a
+            # duplicated summary here is one more place to go stale. This one said
+            # "Initial scaffold" for eight releases.
+            ReleaseNotes = 'See CHANGELOG.md in the project repository.'
         }
     }
 }

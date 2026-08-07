@@ -76,8 +76,12 @@ function Test-AgentDisabledPolicies {
     $policies = @()
     $disabled = @()
     $readable = $false
+    $readPolicies = $false
     try {
-        $policies = @(Get-VBRComputerBackupJob -ErrorAction SilentlyContinue)
+        # Cached: AGT-003 reads the same policy list, and enumerating it twice per run
+        # is a cost paid on every server in the estate for no new information.
+        $policies = @(Get-PrecheckCached -Key 'ComputerBackupJobs' -Getter { Get-VBRComputerBackupJob -ErrorAction SilentlyContinue })
+        $readPolicies = $true
         foreach ($p in $policies) {
             if (-not $p.PSObject.Properties['JobEnabled']) { continue }
             $readable = $true
@@ -87,6 +91,18 @@ function Test-AgentDisabledPolicies {
             $disabled += "$($p.Name)  [$mode$(if ($target) { ", target: $target" })]"
         }
     } catch { }
+
+    # An unread collection is empty, and the clean result at the bottom used to be reached
+    # by falling through it: a throwing cmdlet produced "No Agent Backup Policies exist on
+    # this server" - word for word what a broken probe emits, on a check that can otherwise
+    # report a migration failure. AGT-003 reads this same list and degrades correctly; this
+    # one had the guard for an unreadable PROPERTY ($readable) but not for an unreadable
+    # ENUMERATION, which is the case that actually presents in the field.
+    if (-not $readPolicies) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Agent backup policies could not be enumerated on this server, so none was evaluated.' `
+            -Recommendation 'Check each Agent Backup Policy by hand: any DISABLED policy must have had its configuration applied successfully (policies in Protection Groups synced) before migration, or migration will fail.'
+    }
 
     if ($policies.Count -gt 0 -and -not $readable) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
@@ -130,7 +146,8 @@ function Test-MacAgentDomainAuth {
     $jobCount = 0
     $readJobs = $false
     try {
-        $all = @(Get-VBRComputerBackupJob -ErrorAction SilentlyContinue)
+        # Same cached list AGT-002 reads - one enumeration per run, not two.
+        $all = @(Get-PrecheckCached -Key 'ComputerBackupJobs' -Getter { Get-VBRComputerBackupJob -ErrorAction SilentlyContinue })
         $jobCount = $all.Count
         # Whole words only. A bare substring match on 'Mac' also matches the word
         # "machine", which these type strings are very likely to contain, and that

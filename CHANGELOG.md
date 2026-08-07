@@ -14,6 +14,60 @@ produces.
 
 ## [Unreleased]
 ### Added
+### Changed
+### Fixed
+
+## [0.8.2] - 2026-08-07
+### Fixed
+- **Three checks returned a confident clean result when their cmdlet threw.** Found by a
+  review pass that asked one question of every check — *what does this report if the
+  enumeration fails?* — and then measured the answer instead of reading the code. All three
+  had the same shape as the four found at 0.7.x: an unread collection is empty, and the clean
+  result was reached by falling through that empty collection.
+  - **AGT-002** reported `Pass` — *"No Agent Backup Policies exist on this server"*, word for
+    word what a broken probe emits. It guarded an unreadable enabled-state **property** but
+    not an unreadable **enumeration**, which is the case that actually presents in the field.
+    AGT-003 reads the same list and degraded correctly, which is what made this easy to miss.
+    A disabled policy whose configuration was never applied **fails the migration**, so this
+    suppressed a real blocker.
+  - **JOB-003** reported `Pass` — *"pre/post-job commands, job-level guest scripts, and
+    per-machine guest script overrides were all checked"* — a confident statement about three
+    surfaces, none of which had been read. The files it looks for are **not copied by
+    migration**, so the cost of missing them is jobs that break after the move.
+  - **SEC-004** reported `Pass` — *"0 repository/repositories were checked and none grants
+    access to a named account"*. It enumerated inside the `foreach`, which made a throwing
+    query indistinguishable from an empty one. Zero is also impossible on a real server: the
+    install creates a default backup repository and one always remains, so none coming back
+    now defers as well — the same reasoning SEC-005 already applies to its assignment count.
+  All three now report `Manual`, naming what could not be read.
+- **PRE-003 silently dropped its next step when the tape job list could not be read**,
+  reusing *"No file-to-tape jobs detected"* for a query that never returned. It stays
+  `Skipped`, so a server with no tape infrastructure still gains no noise, but the report now
+  says which of the two happened.
+- **The module withheld a function its manifest promised.** `FunctionsToExport` listed
+  `Export-PrecheckRoleAssignmentScript`; `Export-ModuleMember` did not. The effective export
+  set is the *intersection*, so it was unavailable to anyone importing the module — and
+  nothing failed, because the orchestrator calls it from inside the module where the export
+  list is irrelevant. A test now asserts the two lists agree.
+- ENV-002 no longer describes a `SocketLicenseSummary` as "present" when the licence exposes
+  the property as null.
+### Changed
+- **AGT-002 and AGT-003 now share one enumeration of the agent policy list.** They read the
+  same cmdlet and both went to the server for it, on every run, on every server. A test counts
+  the reads, because nothing in the *results* changes if the cache is dropped again.
+- **JOB-003's clean result states its denominator** — *"None of the 4 job(s) on this server
+  has a script configured"* — and distinguishes an empty job list from an examined one. It was
+  the last clean result in the tool carrying no quantity.
+### Added
+- Nine regression tests covering the above, **eight of them mutation-validated** — each defect
+  reintroduced, the test confirmed to fail, the tree restored. One mutation earned its keep
+  immediately: the first SEC-004 test passed with the guard under test deleted, because both
+  unreadable branches say "could not be enumerated" and a throw leaves the count at zero. It
+  now asserts the throwing branch's own wording.
+
+#### Also shipping in 0.8.2 — completed after 0.8.1 was tagged
+These were test-and-documentation changes, which carry no bump of their own; they reach an
+artefact with this release.
 - **The UPN question is settled by measurement, and no code changed — which is the result.**
   KB4800 says *"all domain usernames must be formatted in UPN format (user@fqdn)"*, which read
   literally would make `fqdn\user` a finding everywhere. Testing each surface separately shows
@@ -33,10 +87,9 @@ produces.
   operators to change credentials that work, on every server using that form.
 - The repository-wide lab-identifier guard covers more patterns, after a real lab username
   reached a draft of that note.
-- **G1 is complete: all 25 checks are now exercised by the suite, in both directions.**
+- **G1 is complete: all 26 checks are now exercised by the suite, in both directions.**
   The last seven needed no lab hardware — PRE-001..004, ENV-001, SEC-001 and SEC-003 are
-  driven by mocked cmdlets or by the context object alone. 143 tests in the development
-  tree, 122 of them shipped; 14 further mutations, all caught.
+  driven by mocked cmdlets or by the context object alone. 14 further mutations, all caught.
 - **ENV-001's "no claim about an unreleased build" is now pinned by a test.** Anything
   newer than 13.1 returns `Manual`, and the test asserts it is neither `Pass` nor
   `Blocker`, so a future edit cannot pre-judge a release that does not exist yet.

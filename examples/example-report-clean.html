@@ -37,8 +37,8 @@
   <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
   <div class="meta">Server: BACKUP01.corp.local &nbsp;|&nbsp;
     Build: Veeam Backup &amp; Replication 13.0.2.29 &nbsp;|&nbsp;
-    Generated: 2026-08-06 18:34:17 -04:00 &nbsp;|&nbsp;
-    Precheck version: 0.8.1 &nbsp;|&nbsp;
+    Generated: 2026-08-07 12:03:19 -04:00 &nbsp;|&nbsp;
+    Precheck version: 0.8.2 &nbsp;|&nbsp;
     Reference: KB4800 (captured 2026-08-04)</div>
 </header>
 <div class="wrap">
@@ -130,9 +130,9 @@
   <td class="mono">DB-001</td>
   <td>
     <div class="title">Session-history retention</div>
-    <div class="detail">Session history is kept for 13 week(s), which is shorter than the 104 week(s) since the upgrade on 2024-08-06 - so any sessions predating the upgrade have already aged out of the database.</div>
+    <div class="detail">Session history is kept for 13 week(s), which is shorter than the 104 week(s) since the upgrade on 2024-08-07 - so any sessions predating the upgrade have already aged out of the database.</div>
     
-    <ul class='ev'><li>KeepAllSessions=False</li><li>RetentionLimitWeeks=13</li><li>Upgrade cutoff=2024-08-06</li><li>Weeks since cutoff=104</li></ul>
+    <ul class='ev'><li>KeepAllSessions=False</li><li>RetentionLimitWeeks=13</li><li>Upgrade cutoff=2024-08-07</li><li>Weeks since cutoff=104</li></ul>
   </td>
   <td class="cat">Job history</td>
 </tr>
@@ -218,7 +218,7 @@
   <td class="mono">JOB-003</td>
   <td>
     <div class="title">Job and guest-processing scripts</div>
-    <div class="detail">No scripts are configured on any job - pre/post-job commands, job-level guest scripts, and per-machine guest script overrides were all checked. CSV files read by a job cannot be detected; confirm those by hand.</div>
+    <div class="detail">None of the 2 job(s) on this server has a script configured - pre/post-job commands, job-level guest scripts, and per-machine guest script overrides were all checked. CSV files read by a job cannot be detected; confirm those by hand.</div>
     
     
   </td>

@@ -259,8 +259,13 @@ function Test-RepositoryLocalAccounts {
     # non-existent property went unnoticed.
     $repoCount = 0; $acctCount = 0
     $local = @(); $review = @(); $sawUsers = $false; $sawPerm = $false
+    $readRepos = $false
     try {
-        foreach ($repo in Get-VBRBackupRepository -ErrorAction SilentlyContinue) {
+        # Materialised before the loop so a throwing enumeration is distinguishable from
+        # an empty one. Enumerating inside the foreach made those two identical.
+        $repos = @(Get-VBRBackupRepository -ErrorAction SilentlyContinue)
+        $readRepos = $true
+        foreach ($repo in $repos) {
             $repoCount++
             $perm = Get-VBREPPermission -Repository $repo -ErrorAction SilentlyContinue
             if (-not $perm) { continue }
@@ -308,6 +313,23 @@ function Test-RepositoryLocalAccounts {
             -Recommendation 'Confirm each account below is a domain account. A machine-local account must be removed before migrating - its SID does not exist on the appliance and migration reports "SID not found".' `
             -Evidence ($review | Sort-Object -Unique)
     }
+    # Neither of these is a clean result. An unread collection is empty, and the Pass at
+    # the bottom used to be reached by falling through it, reporting "0 repository/
+    # repositories were checked and none grants access to a named account" - a confident
+    # clean statement derived from nothing. Zero is also impossible on a real server: the
+    # install creates a default backup repository and one always remains, so none coming
+    # back means the read did not work. Same reasoning as SEC-005's assignment count.
+    if (-not $readRepos) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'The repository list could not be enumerated on this server, so no repository access permission was examined.' `
+            -Recommendation 'Check each repository''s Access Permissions by hand (Backup Infrastructure > Backup Repositories > right-click > Access Permissions) and remove any machine-local accounts before migrating - their SIDs do not exist on the appliance and migration reports "SID not found".'
+    }
+    if ($repoCount -eq 0) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'No repositories were returned on this server, so no access permission was examined. A backup server always has at least one repository, so none being returned means they could not be enumerated.' `
+            -Recommendation 'Check each repository''s Access Permissions by hand and remove any machine-local accounts before migrating ("SID not found" risk).'
+    }
+
     if ($sawPerm -and -not $sawUsers) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
             -Detail 'Repository access permissions were returned but carried no account list in the expected form, so they were not evaluated.' `

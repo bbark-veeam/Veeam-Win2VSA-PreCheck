@@ -47,8 +47,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.8.1
-#  Built   : 2026-08-06 18:34:17
+#  Version : 0.8.2
+#  Built   : 2026-08-07 12:02:54
 #  Sources : 16 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +60,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.8.1'
+$script:PrecheckVersion = '0.8.2'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -408,8 +408,12 @@ function Test-AgentDisabledPolicies {
     $policies = @()
     $disabled = @()
     $readable = $false
+    $readPolicies = $false
     try {
-        $policies = @(Get-VBRComputerBackupJob -ErrorAction SilentlyContinue)
+        # Cached: AGT-003 reads the same policy list, and enumerating it twice per run
+        # is a cost paid on every server in the estate for no new information.
+        $policies = @(Get-PrecheckCached -Key 'ComputerBackupJobs' -Getter { Get-VBRComputerBackupJob -ErrorAction SilentlyContinue })
+        $readPolicies = $true
         foreach ($p in $policies) {
             if (-not $p.PSObject.Properties['JobEnabled']) { continue }
             $readable = $true
@@ -419,6 +423,18 @@ function Test-AgentDisabledPolicies {
             $disabled += "$($p.Name)  [$mode$(if ($target) { ", target: $target" })]"
         }
     } catch { }
+
+    # An unread collection is empty, and the clean result at the bottom used to be reached
+    # by falling through it: a throwing cmdlet produced "No Agent Backup Policies exist on
+    # this server" - word for word what a broken probe emits, on a check that can otherwise
+    # report a migration failure. AGT-003 reads this same list and degrades correctly; this
+    # one had the guard for an unreadable PROPERTY ($readable) but not for an unreadable
+    # ENUMERATION, which is the case that actually presents in the field.
+    if (-not $readPolicies) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Agent backup policies could not be enumerated on this server, so none was evaluated.' `
+            -Recommendation 'Check each Agent Backup Policy by hand: any DISABLED policy must have had its configuration applied successfully (policies in Protection Groups synced) before migration, or migration will fail.'
+    }
 
     if ($policies.Count -gt 0 -and -not $readable) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
@@ -462,7 +478,8 @@ function Test-MacAgentDomainAuth {
     $jobCount = 0
     $readJobs = $false
     try {
-        $all = @(Get-VBRComputerBackupJob -ErrorAction SilentlyContinue)
+        # Same cached list AGT-002 reads - one enumeration per run, not two.
+        $all = @(Get-PrecheckCached -Key 'ComputerBackupJobs' -Getter { Get-VBRComputerBackupJob -ErrorAction SilentlyContinue })
         $jobCount = $all.Count
         # Whole words only. A bare substring match on 'Mac' also matches the word
         # "machine", which these type strings are very likely to contain, and that
@@ -1039,7 +1056,10 @@ function Test-VbrLicense {
 
     # VBRInstalledLicense: SocketLicenseSummary (an ARRAY), InstanceLicenseSummary,
     # CapacityLicenseSummary, Type, Edition.
-    $socketSummary   = if ($lic.PSObject.Properties['SocketLicenseSummary'])   { @($lic.SocketLicenseSummary) } else { @() }
+    # Null entries are dropped, not counted: @($null) is a one-element array, so a licence
+    # exposing the property as null would satisfy "a SocketLicenseSummary is present" below
+    # and the report would describe something that is not there.
+    $socketSummary   = if ($lic.PSObject.Properties['SocketLicenseSummary'])   { @($lic.SocketLicenseSummary | Where-Object { $null -ne $_ }) } else { @() }
     $instanceSummary = if ($lic.PSObject.Properties['InstanceLicenseSummary']) { $lic.InstanceLicenseSummary } else { $null }
 
     # Count the SOCKETS, not the array entries: an instance-based licence still
@@ -1242,8 +1262,13 @@ function Test-JobScriptsAndFiles {
     # docs/checks-reference.md for why an earlier version that read only the first
     # returned a clean result on a job with four scripts configured.
     $scripts = @()
+    $readJobs = $false
+    $examined = 0
     try {
-        foreach ($job in @(Get-PrecheckCached -Key 'Jobs' -Getter { Get-VBRJob -ErrorAction SilentlyContinue })) {
+        $allJobs = @(Get-PrecheckCached -Key 'Jobs' -Getter { Get-VBRJob -ErrorAction SilentlyContinue })
+        $readJobs = $true
+        foreach ($job in $allJobs) {
+            $examined++
 
             # --- 1. pre/post-JOB commands (job Advanced settings) --------------
             $jsc = $null
@@ -1285,12 +1310,29 @@ function Test-JobScriptsAndFiles {
 
     if ($scripts.Count -gt 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-            -Detail "$($scripts.Count) script reference(s) found. These files are NOT copied by migration." `
+            -Detail "$($scripts.Count) script reference(s) found across $examined job(s). These files are NOT copied by migration." `
             -Recommendation 'Copy each script to the Veeam Software Appliance manually and update the job settings (paths) after migration. Also confirm whether any job reads a CSV file - those are not detectable here and are not copied either.' `
             -Evidence $scripts
     }
-    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-        -Detail 'No scripts are configured on any job - pre/post-job commands, job-level guest scripts, and per-machine guest script overrides were all checked. CSV files read by a job cannot be detected; confirm those by hand.'
+
+    # An unread collection is empty, and the clean result below used to be reached by
+    # falling through it - so a throwing job query produced "No scripts are configured on
+    # any job ... were all checked", a confident statement about three surfaces none of
+    # which had been read. Every other check of this shape degrades instead.
+    if (-not $readJobs) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'The job list could not be enumerated on this server, so no job was examined for scripts.' `
+            -Recommendation 'Check by hand whether any job uses pre/post-job commands, pre-freeze/post-thaw guest scripts, or a CSV file. None of those files is copied by migration - copy them to the Veeam Software Appliance manually and update the paths afterward.'
+    }
+
+    # The denominator is what makes this clean result checkable: "no scripts" reads the
+    # same whether every job was examined or the list came back short.
+    $detail = if ($examined -eq 0) {
+        'The job list on this server was read successfully and is empty, so there is no job script to copy.'
+    } else {
+        "None of the $examined job(s) on this server has a script configured - pre/post-job commands, job-level guest scripts, and per-machine guest script overrides were all checked. CSV files read by a job cannot be detected; confirm those by hand."
+    }
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass -Detail $detail
 }
 
 # Pulls the configured script paths out of a CGuestScriptsOptions, for either the
@@ -1434,11 +1476,22 @@ function Test-PreFileToTapeHostname {
     }
 
     $fileToTape = @()
+    $readTapeJobs = $false
     try {
-        $fileToTape = @(Get-VBRTapeJob -ErrorAction SilentlyContinue |
+        $tapeJobs = @(Get-VBRTapeJob -ErrorAction SilentlyContinue)
+        $readTapeJobs = $true
+        $fileToTape = @($tapeJobs |
             Where-Object { "$($_.Type) $($_.TypeToString)" -match 'File' } |
             ForEach-Object { $_.Name })
     } catch { }
+
+    # Still Skipped, so a server with no tape infrastructure gains no noise - but the
+    # report says which of the two happened. Silently reusing "no file-to-tape jobs
+    # detected" for a read that failed loses the next step without saying so.
+    if (-not $readTapeJobs) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Skipped `
+            -Detail 'Tape jobs could not be enumerated on this server, so whether the file-to-tape source-hostname step applies was not determined.'
+    }
 
     if ($fileToTape.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Skipped `
@@ -1741,8 +1794,13 @@ function Test-RepositoryLocalAccounts {
     # non-existent property went unnoticed.
     $repoCount = 0; $acctCount = 0
     $local = @(); $review = @(); $sawUsers = $false; $sawPerm = $false
+    $readRepos = $false
     try {
-        foreach ($repo in Get-VBRBackupRepository -ErrorAction SilentlyContinue) {
+        # Materialised before the loop so a throwing enumeration is distinguishable from
+        # an empty one. Enumerating inside the foreach made those two identical.
+        $repos = @(Get-VBRBackupRepository -ErrorAction SilentlyContinue)
+        $readRepos = $true
+        foreach ($repo in $repos) {
             $repoCount++
             $perm = Get-VBREPPermission -Repository $repo -ErrorAction SilentlyContinue
             if (-not $perm) { continue }
@@ -1790,6 +1848,23 @@ function Test-RepositoryLocalAccounts {
             -Recommendation 'Confirm each account below is a domain account. A machine-local account must be removed before migrating - its SID does not exist on the appliance and migration reports "SID not found".' `
             -Evidence ($review | Sort-Object -Unique)
     }
+    # Neither of these is a clean result. An unread collection is empty, and the Pass at
+    # the bottom used to be reached by falling through it, reporting "0 repository/
+    # repositories were checked and none grants access to a named account" - a confident
+    # clean statement derived from nothing. Zero is also impossible on a real server: the
+    # install creates a default backup repository and one always remains, so none coming
+    # back means the read did not work. Same reasoning as SEC-005's assignment count.
+    if (-not $readRepos) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'The repository list could not be enumerated on this server, so no repository access permission was examined.' `
+            -Recommendation 'Check each repository''s Access Permissions by hand (Backup Infrastructure > Backup Repositories > right-click > Access Permissions) and remove any machine-local accounts before migrating - their SIDs do not exist on the appliance and migration reports "SID not found".'
+    }
+    if ($repoCount -eq 0) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'No repositories were returned on this server, so no access permission was examined. A backup server always has at least one repository, so none being returned means they could not be enumerated.' `
+            -Recommendation 'Check each repository''s Access Permissions by hand and remove any machine-local accounts before migrating ("SID not found" risk).'
+    }
+
     if ($sawPerm -and -not $sawUsers) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Info `
             -Detail 'Repository access permissions were returned but carried no account list in the expected form, so they were not evaluated.' `
@@ -2474,7 +2549,7 @@ function Invoke-VbrMigrationPrecheck {
         'Test-AgentVersions'
         'Test-AgentDisabledPolicies'
         'Test-MacAgentDomainAuth'
-        'Test-ProtectionGroupPostMigration',
+        'Test-ProtectionGroupPostMigration'
         'Test-AdProtectionGroupLdapPort'
         'Test-NetAppOntapRole'
         'Test-StoragePluginVersions'

@@ -34,6 +34,10 @@ $script:PrecheckRoot = Split-Path -Parent $here
 $public = @(
     'Connect-VbrPrecheck',
     'Invoke-VbrMigrationPrecheck',
-    'Export-PrecheckReport'
+    'Export-PrecheckReport',
+    # The orchestrator writes this itself, but it is also useful on its own - and the
+    # manifest has always listed it. The effective export set is the INTERSECTION of the
+    # two lists, so omitting it here silently withheld a function the manifest promised.
+    'Export-PrecheckRoleAssignmentScript'
 )
 Export-ModuleMember -Function $public

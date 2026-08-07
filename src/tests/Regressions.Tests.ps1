@@ -40,6 +40,7 @@ BeforeAll {
     $global:MockTapeJobs    = @()
     $global:MockCloudTenants  = @()
     $global:MockCloudGateways = @()
+    $global:MockPolicyReads   = 0
 
     # Cmdlets named here throw instead of returning data. That is how an unreadable
     # collection actually presents in the field - a licence-dependent cmdlet (see
@@ -54,7 +55,10 @@ BeforeAll {
     }
 
     function global:Get-VBRDiscoveredComputer      { param($ErrorAction) $global:MockAgents }
-    function global:Get-VBRComputerBackupJob       { param($ErrorAction) Assert-MockOk 'Get-VBRComputerBackupJob'; $global:MockPolicies }
+    # Counts its calls: AGT-002 and AGT-003 read the same policy list, and it is cached so
+    # the run enumerates it once. A test asserts the count, because a future edit dropping
+    # the cache would be invisible otherwise - the results would be identical.
+    function global:Get-VBRComputerBackupJob       { param($ErrorAction) Assert-MockOk 'Get-VBRComputerBackupJob'; $global:MockPolicyReads++; $global:MockPolicies }
     function global:Get-VBRProtectionGroup         { param($ErrorAction) Assert-MockOk 'Get-VBRProtectionGroup'; $global:MockGroups }
     function global:Get-VBRCDPPolicy               { param($ErrorAction) Assert-MockOk 'Get-VBRCDPPolicy'; $global:MockCdp }
     function global:Get-VBREntraIDTenant           { param($ErrorAction) Assert-MockOk 'Get-VBREntraIDTenant'; $global:MockTenants }
@@ -77,9 +81,9 @@ BeforeAll {
     }
     function global:Get-VBRCloudTenant            { param($ErrorAction) Assert-MockOk 'Get-VBRCloudTenant'; $global:MockCloudTenants }
     function global:Get-VBRCloudGateway           { param($ErrorAction) Assert-MockOk 'Get-VBRCloudGateway'; $global:MockCloudGateways }
-    function global:Get-VBRBackupRepository        { param($ErrorAction) $global:MockRepos }
+    function global:Get-VBRBackupRepository        { param($ErrorAction) Assert-MockOk 'Get-VBRBackupRepository'; $global:MockRepos }
     function global:Get-VBRUserRoleAssignment      { param($ErrorAction) $global:MockRoles }
-    function global:Get-VBRJob                     { param($ErrorAction) $global:MockJobs }
+    function global:Get-VBRJob                     { param($ErrorAction) Assert-MockOk 'Get-VBRJob'; $global:MockJobs }
     function global:Get-VBRJobObject               { param($Job, $ErrorAction) $global:MockJobObjects }
     function global:Get-VBRApplicationGroup        { param($ErrorAction) Assert-MockOk 'Get-VBRApplicationGroup'; $global:MockAppGroups }
     function global:Get-VBRGoogleCloudAccount      { param($ErrorAction) $global:MockGcpAccounts }
@@ -121,6 +125,7 @@ BeforeAll {
         $global:MockLicense = $null; $global:MockHistory = $null; $global:MockSecurityOptions = $null
         $global:MockServers = @(); $global:MockTapeJobs = @(); $global:MockRegistry = @{}
         $global:MockCloudTenants = @(); $global:MockCloudGateways = @()
+        $global:MockPolicyReads = 0
     }
 
     # ENV-001 reads nothing but the context, so it is driven by supplying one.
@@ -176,6 +181,39 @@ Describe 'AGT-002 disabled agent policies' {
             [pscustomobject]@{ Name = 'B'; JobEnabled = $true; ScheduleEnabled = $true; Mode = 'ManagedByAgent'; BackupObject = 'PG' }
         )
         (Invoke-Check 'Test-AgentDisabledPolicies').Detail | Should -Match '2 polic'
+    }
+
+    # THE DEFECT THIS PINS: this check failed OPEN. It guarded an unreadable enabled-state
+    # PROPERTY but not an unreadable ENUMERATION, so a throwing cmdlet fell through the
+    # empty collection and reported Pass - "No Agent Backup Policies exist on this server",
+    # which is word for word what a broken probe emits. AGT-003 reads the same list in the
+    # same file and degraded correctly, which is what made this one easy to miss.
+    It 'reports Manual rather than Pass when the policies cannot be read' {
+        $global:MockThrow = @('Get-VBRComputerBackupJob')
+        $r = Invoke-Check 'Test-AgentDisabledPolicies'
+        $r.Status | Should -Be 'Manual'
+        $r.Status | Should -Not -Be 'Pass'
+        $r.Detail | Should -Match 'could not be enumerated'
+    }
+
+    # A genuinely empty list still reads as clean, and says which it was.
+    It 'says the list was read when there are genuinely no policies' {
+        $r = Invoke-Check 'Test-AgentDisabledPolicies'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'No Agent Backup Policies exist'
+    }
+
+    # AGT-002 and AGT-003 read the same list, so the run enumerates it once. Nothing in the
+    # RESULTS changes if the cache is dropped, which is exactly why this needs asserting -
+    # it would silently become two enumerations per server across the estate.
+    It 'shares one enumeration of the policy list with AGT-003' {
+        $global:MockPolicies = @(
+            [pscustomobject]@{ Name = 'A'; JobEnabled = $true; ScheduleEnabled = $true; Mode = 'ManagedByAgent'; BackupObject = 'PG'; OSPlatform = 'Windows' }
+        )
+        $global:MockPolicyReads = 0
+        Invoke-Check 'Test-AgentDisabledPolicies' | Out-Null
+        Invoke-Check 'Test-MacAgentDomainAuth'    | Out-Null
+        $global:MockPolicyReads | Should -Be 1
     }
 }
 
@@ -262,6 +300,36 @@ Describe 'SEC-004 repository access accounts' {
         $global:MockRepos = @([pscustomobject]@{ Name = 'Repo1'; Host = [pscustomobject]@{ Name = 'backup01.corp.local' } })
         $global:MockPerms = @{ 'Repo1' = @('CORP\svc') }
         (Invoke-Check 'Test-RepositoryLocalAccounts').Detail | Should -Match '1 account entry'
+    }
+
+    # THE DEFECT THIS PINS: enumerating inside the foreach made a throwing repository query
+    # indistinguishable from an empty one, and the check reported Pass - "0 repository/
+    # repositories were checked and none grants access to a named account". Like AGT-002 it
+    # guarded the unreadable PROPERTY ($sawUsers) and not the unreadable enumeration, on a
+    # check whose finding is a migration-time "SID not found" failure.
+    #
+    # Note the assertion names the throwing case's own wording. Both unreadable branches say
+    # "could not be enumerated", and a throw leaves the count at zero, so matching that
+    # phrase alone let the zero-count guard satisfy this test - it passed with the guard
+    # under test deleted. Mutation testing is what surfaced that; the looser assertion had
+    # looked fine.
+    It 'reports Manual rather than Pass when the repositories cannot be read' {
+        $global:MockThrow = @('Get-VBRBackupRepository')
+        $r = Invoke-Check 'Test-RepositoryLocalAccounts'
+        $r.Status | Should -Be 'Manual'
+        $r.Status | Should -Not -Be 'Pass'
+        $r.Detail | Should -Match 'The repository list could not be enumerated'
+    }
+
+    # Zero is not a clean result either: the install creates a default backup repository and
+    # one always remains, so none coming back means the read did not work. Same reasoning
+    # SEC-005 applies to its assignment count.
+    It 'defers rather than passing when no repositories come back' {
+        $global:MockRepos = @()
+        $r = Invoke-Check 'Test-RepositoryLocalAccounts'
+        $r.Status | Should -Be 'Manual'
+        $r.Status | Should -Not -Be 'Pass'
+        $r.Detail | Should -Match 'always has at least one repository'
     }
 }
 
@@ -383,6 +451,35 @@ Describe 'JOB-003 job and guest scripts' {
             [pscustomobject]@{ Name = 'VM-B'; VssOptions = [pscustomobject]@{ GuestScriptsOptions = $empty } }
         )
         (Invoke-Check 'Test-JobScriptsAndFiles').Status | Should -Be 'Pass'
+    }
+
+    # THE DEFECT THIS PINS: the check failed OPEN. A throwing job query left $scripts empty
+    # and the clean result claimed "pre/post-job commands, job-level guest scripts, and
+    # per-machine guest script overrides were all checked" - a confident statement about
+    # three surfaces, none of which had been read. The files it looks for are not copied by
+    # migration, so a false clean here means jobs that break after the move.
+    It 'reports Manual rather than Pass when the job list cannot be read' {
+        $global:MockThrow = @('Get-VBRJob')
+        $r = Invoke-Check 'Test-JobScriptsAndFiles'
+        $r.Status | Should -Be 'Manual'
+        $r.Status | Should -Not -Be 'Pass'
+        $r.Detail | Should -Match 'could not be enumerated'
+    }
+
+    # The denominator is what lets a reader tell a full examination from a short one.
+    It 'states how many jobs it examined when reporting a Pass' {
+        $empty = New-Gso2 'Disabled' (New-Sf $null $null)
+        $global:MockJobs = @((New-MockJob 'A' $empty $null $null), (New-MockJob 'B' $empty $null $null))
+        $r = Invoke-Check 'Test-JobScriptsAndFiles'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'None of the 2 job\(s\)'
+    }
+
+    It 'distinguishes an empty job list from a clean one' {
+        $global:MockJobs = @()
+        $r = Invoke-Check 'Test-JobScriptsAndFiles'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'read successfully and is empty'
     }
 }
 
@@ -1281,6 +1378,18 @@ Describe 'PRE-003 file-to-tape source hostname' {
 
     It 'stays silent when there are no tape jobs at all' {
         (Invoke-Check 'Test-PreFileToTapeHostname').Status | Should -Be 'Skipped'
+    }
+
+    # An unreadable tape job list silently reused "No file-to-tape jobs detected", so the
+    # next step disappeared with no way to tell from the report that it had never been
+    # evaluated. It stays Skipped - a server with no tape infrastructure must not gain a
+    # next step it does not need - but the report now says which of the two happened.
+    It 'says so when the tape jobs cannot be read, rather than claiming none exist' {
+        $global:MockThrow = @('Get-VBRTapeJob')
+        $r = Invoke-Check 'Test-PreFileToTapeHostname'
+        $r.Status | Should -Be 'Skipped'
+        $r.Detail | Should -Match 'could not be enumerated'
+        $r.Detail | Should -Not -Match 'No file-to-tape jobs detected'
     }
 }
 

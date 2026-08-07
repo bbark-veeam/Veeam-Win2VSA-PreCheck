@@ -78,7 +78,7 @@ function Invoke-VbrMigrationPrecheck {
         'Test-AgentVersions'
         'Test-AgentDisabledPolicies'
         'Test-MacAgentDomainAuth'
-        'Test-ProtectionGroupPostMigration',
+        'Test-ProtectionGroupPostMigration'
         'Test-AdProtectionGroupLdapPort'
         'Test-NetAppOntapRole'
         'Test-StoragePluginVersions'

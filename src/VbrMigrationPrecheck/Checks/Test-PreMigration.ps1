@@ -78,11 +78,22 @@ function Test-PreFileToTapeHostname {
     }
 
     $fileToTape = @()
+    $readTapeJobs = $false
     try {
-        $fileToTape = @(Get-VBRTapeJob -ErrorAction SilentlyContinue |
+        $tapeJobs = @(Get-VBRTapeJob -ErrorAction SilentlyContinue)
+        $readTapeJobs = $true
+        $fileToTape = @($tapeJobs |
             Where-Object { "$($_.Type) $($_.TypeToString)" -match 'File' } |
             ForEach-Object { $_.Name })
     } catch { }
+
+    # Still Skipped, so a server with no tape infrastructure gains no noise - but the
+    # report says which of the two happened. Silently reusing "no file-to-tape jobs
+    # detected" for a read that failed loses the next step without saying so.
+    if (-not $readTapeJobs) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Skipped `
+            -Detail 'Tape jobs could not be enumerated on this server, so whether the file-to-tape source-hostname step applies was not determined.'
+    }
 
     if ($fileToTape.Count -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Skipped `

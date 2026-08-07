@@ -60,7 +60,10 @@ function Test-VbrLicense {
 
     # VBRInstalledLicense: SocketLicenseSummary (an ARRAY), InstanceLicenseSummary,
     # CapacityLicenseSummary, Type, Edition.
-    $socketSummary   = if ($lic.PSObject.Properties['SocketLicenseSummary'])   { @($lic.SocketLicenseSummary) } else { @() }
+    # Null entries are dropped, not counted: @($null) is a one-element array, so a licence
+    # exposing the property as null would satisfy "a SocketLicenseSummary is present" below
+    # and the report would describe something that is not there.
+    $socketSummary   = if ($lic.PSObject.Properties['SocketLicenseSummary'])   { @($lic.SocketLicenseSummary | Where-Object { $null -ne $_ }) } else { @() }
     $instanceSummary = if ($lic.PSObject.Properties['InstanceLicenseSummary']) { $lic.InstanceLicenseSummary } else { $null }
 
     # Count the SOCKETS, not the array entries: an instance-based licence still

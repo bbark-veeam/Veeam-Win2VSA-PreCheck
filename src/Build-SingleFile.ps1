@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     The precheck is developed as a module (Private/ Checks/ Public/) because that
-    keeps 25 checks navigable. But it is RUN by the customer, unattended, on a large
+    keeps 26 checks navigable. But it is RUN by the customer, unattended, on a large
     number of servers - and a multi-file module means copying a folder tree, keeping
     an entry script beside it, a .psd1/.psm1 to explain, and Mark-of-the-Web on every
     file. That has already caused mistakes.
