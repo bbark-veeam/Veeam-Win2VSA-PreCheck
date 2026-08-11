@@ -16,23 +16,23 @@ against a real environment (see the caveat at the bottom).
 | ENV-001 | Environment | Source must be on the **13.0.x** train; **13.1 cannot migrate**. The **target appliance must run the same version as the source**, and since the source build is known the report names it exactly. Builds newer than 13.1 return `Manual` — the check makes no claim about releases that have not shipped | `Get-VBRBackupServerInfo` / registry / core DLL | Pass / Action / Blocker / Manual / Info | High — validated live in both directions (13.1 → Blocker, 13.0.2 → Pass) |
 | ENV-002 | Environment | VSA supports only instance-based VUL; socket must convert | `Get-VBRInstalledLicense` | Pass / Action / Info | High — instance path validated live; socket path shape-confirmed by reflection, values synthetic (socket licensing is deprecated, so a socket licence cannot be obtained to test) |
 | DEP-001 | Deployment | Cloud Connect deployments cannot migrate. Read from the licence itself (`.CloudConnect` = Enabled/Disabled/Enterprise/Invalid); tenants and gateways enrich the evidence | `Get-VBRInstalledLicense`, `Get-VBRCloudTenant`, `Get-VBRCloudGateway` | Pass / Blocker / Info | High — validated live in both directions (Disabled → Pass, Enterprise → Blocker) |
-| DEP-002 | Deployment | Google Cloud plug-in config will not migrate (Windows-only). Detected from CONFIGURATION (`Get-VBRGoogleCloudAccount`, `Get-VBRGoogleCloudComputeAccount`) plus a job-name signal. The plug-in ships with VBR so installation proves nothing; external repositories are not examined | `Get-VBRGoogleCloud*Account`, `Get-VBRJob` | Pass / Warning / Manual | Medium |
+| DEP-002 | Deployment | Google Cloud plug-in config will not migrate (Windows-only). Detected from CONFIGURATION (`Get-VBRGoogleCloudAccount`, `Get-VBRGoogleCloudComputeAccount`) plus a job-name signal. The plug-in ships with VBR so installation proves nothing; external repositories are not examined | `Get-VBRGoogleCloud*Account`, `Get-VBRJob` | Pass / Warning / Manual | Medium — the **no-configuration** path validated live (2 configuration sources read, job names swept, clean result counted); the **finding** path is mock-tested only, as no Google Cloud account has been available in any environment. The unreadable path degrades to `Manual` and is pinned by a test |
 | DEP-003 | Deployment | Entra ID tenant backup **data** not migrated | `Get-VBREntraIDTenant` | Pass / Manual / Info | Medium — mock-tested |
 | AGT-001 | Agents | All agents must be v13+ to connect | `Get-VBRDiscoveredComputer` | Pass / Action / Manual | High — validated |
-| AGT-002 | Agents | Disabled agent policies must be applied/synced first. Keyed on `JobEnabled` (NOT `IsEnabled`, which does not exist; NOT `ScheduleEnabled`, which is a different thing). Whether config was applied is not exposed at all — see note | `Get-VBRComputerBackupJob` | Pass / Action / Manual / Info | High — validated |
+| AGT-002 | Agents | Disabled agent policies must be applied/synced first. Keyed on `JobEnabled` (NOT `IsEnabled`, which does not exist; NOT `ScheduleEnabled`, which is a different thing). Whether config was applied is not exposed at all — see note | `Get-VBRComputerBackupJob` | Pass / Action / Manual / Info | High — the **enabled** and **disabled** paths validated live on real policies. The **unreadable-enumeration** path returned a false Pass until 0.8.2; it now degrades to `Manual` and is pinned by a mutation-validated test. Whether config was applied is not exposed at all — see note |
 | AGT-003 | Agents | Mac agent domain accounts must become local (no Kerberos/NTLM) | `Get-VBRComputerBackupJob` | Pass / Manual | Low - mock-tested; platform vocabulary still unconfirmed |
 | AGT-005 | Agents | Post-migration: an AD protection group on **port 636** (encrypted LDAP) needs the domain Root CA certificate re-pulled. Only 636 is reported — 389 is the default. Path: `Container.Domain.Port` | `Get-VBRProtectionGroup` | Pass / Manual | Medium — the 389 path validated on a real group, the 636 path mock-tested (reproducing it needs LDAPS on a DC) |
 | AGT-004 | Agents | Post-migration: rescan all PGs; pre-installed-agent PGs need new config file. Keyed on `Container.Type -eq ManuallyDeployed` — see note | `Get-VBRProtectionGroup` | Pass / Manual | High — validated |
 | STG-001 | Storage | NetApp ONTAP: only NAS filer role migrates | `Get-NetAppHost` (no VBR prefix) | Pass / Warning / Info | Medium - mock-tested |
 | STG-002 | Storage | IBM / Hitachi / HPE XP / **NEC Storage V Series** plug-in minimum versions post-migration | `Get-StoragePluginHost` (no VBR prefix) | Pass / Manual / Info | Medium - mock-tested |
-| STG-003 | Storage | HPE Nimble/Alletra: some Nimble OS versions may be unsupported when the **Linux-based** backup server runs FIPS-compliant mode — see note. Status is conditional on `FipsCompliantModeEnabled` | `Get-NimbleHost`, `Get-VBRSecurityOptions` | Pass / Manual / Warning / Info | Medium - mock-tested; a Nimble-integrated server is booked for w/c 2026-08-10 |
+| STG-003 | Storage | HPE Nimble/Alletra: some Nimble OS versions may be unsupported when the **Linux-based** backup server runs FIPS-compliant mode — see note. Status is conditional on `FipsCompliantModeEnabled` | `Get-NimbleHost`, `Get-VBRSecurityOptions` | Pass / Manual / Warning / Info | High — validated on a live Nimble-integrated server (2026-08-10): `CNimbleHost` shape confirmed, `FipsCompliantModeEnabled` read, FIPS-disabled → `Warning` path exercised. The FIPS-enabled and FIPS-unreadable paths remain mock-tested |
 | JOB-001 | Jobs | CDP job config not migrated (manual re-create) | `Get-VBRCDPPolicy` | Pass / Warning / Info | Medium - mock-tested |
 | JOB-002 | Jobs | SureBackup SQL Server Checker Script fails on VSA | `Get-VBRApplicationGroup` | Pass / Blocker / Manual | High — both paths validated |
-| JOB-003 | Jobs | Pre/post-job + pre-freeze/post-thaw scripts & CSVs copied manually. Reads all three surfaces — see note below. CSV files remain undetectable and are named as such | `Get-VBRJob`, `Get-VBRJobObject` | Pass / Manual | High — validated |
-| SEC-001 | Security | Four-eyes authorization disabled during migration | none exists → manual | Manual | n/a — permanently manual; a test pins it so it cannot become a Pass |
+| JOB-003 | Jobs | Pre/post-job + pre-freeze/post-thaw scripts & CSVs copied manually. Reads all three surfaces — see note below. CSV files remain undetectable and are named as such | `Get-VBRJob`, `Get-VBRJobObject` | Pass / Manual | High — all **three script surfaces** validated live on a real job carrying four scripts (pre/post-job, and pre-freeze/post-thaw set per-machine), attributed to the right job and machine. The **unreadable-enumeration** path returned a false Pass claiming all three surfaces were read until 0.8.2; it now degrades to `Manual` and is pinned by a test. CSV files remain undetectable by design |
+| SEC-001 | Security | Four-eyes authorization disabled during migration | none exists → manual | Manual | n/a — permanently manual, now **confirmed by measurement** (2026-08-10): `Get-VBRSecurityOptions` carries exactly six properties and none relates to four-eyes. A test pins it so it cannot become a Pass |
 | SEC-002 | Security | **Datacenter Credential Formatting** — non-UPN **Standard** credentials to review for Kerberos-authenticated connections | `Get-VBRCredentials` | Pass / Manual | Medium — see note |
 | SEC-003 | Security | Trusted-domain authentication unsupported | (manual) | Manual | n/a — permanently manual; a test pins it so it cannot become a Pass |
-| SEC-004 | Security | Local (non-domain) repo access accounts → "SID not found" | `Get-VBREPPermission` -Repository → `.Users` | Pass / Action / Manual / Info | High — validated, both the flagging and the clean path |
+| SEC-004 | Security | Local (non-domain) repo access accounts → "SID not found" | `Get-VBREPPermission` -Repository → `.Users` | Pass / Action / Manual / Info | High — the **flagging** and **clean** paths both validated live on real repositories. The **unreadable-enumeration** path returned a false Pass reading "0 repository/repositories were checked" until 0.8.2; it now degrades to `Manual` and is pinned by a test whose assertion discriminates between the two unreadable branches |
 | SEC-005 | Security | Console role assignments must be UPN (appliance console login) — see note | `Get-VBRUserRoleAssignment` | Pass / Action / Manual | High — validated live: all three source shapes flagged with distinct reasons, and both appliance remediation forms confirmed on real appliances |
 | DB-001 | Job history | Job-history sessions predating the **upgrade to v12** fail migration (the limiting factor is v11-and-earlier session data). **Scoped to a Microsoft SQL configuration database** — see note | `Get-VBRHistoryOptions`, registry `DatabaseConfigurations` | Pass / Action / Manual / Info | High — Pass and Action validated live; the PostgreSQL scoping is shape-confirmed on a real server |
 
@@ -91,10 +91,22 @@ v13, #7 local repo accounts are already enforced as limitation checks above.)
 
 | Verdict | Condition | Exit code |
 |---------|-----------|-----------|
+| *(run failed)* | the run could not start — no report was written | 3 |
 | MIGRATION BLOCKED | any Blocker | 2 |
 | ACTION REQUIRED | any Action, no Blocker | 1 |
 | REVIEW WARNINGS | only Warning/Manual/Info | 0 |
-| READY | all Pass/Skipped | 0 |
+| READY | all Pass/Skipped | 0 *(never emitted — see below)* |
+
+**Exit code 3 means no report exists.** A connect or module-import failure aborts before any
+verdict is reached. It is separated from `1` deliberately: at fleet scale a server that produced
+nothing must not be triaged as one that merely has actions.
+
+**READY is structurally unreachable, and that is accepted and deliberate.** SEC-001 (four-eyes)
+and SEC-003 (trusted-domain authentication) return `Manual` unconditionally — neither is exposed
+to PowerShell at all — and the ladder demotes on any `Manual`, so no server can score `READY`.
+**`REVIEW WARNINGS` with only SEC-001 and SEC-003 outstanding is a clean bill of health.** The
+exit code is already `0`, so automation is unaffected. A test pins this so the verdict cannot
+silently become reachable.
 
 ## Note on DB-001 — the failure is scoped to a Microsoft SQL configuration database
 
@@ -197,28 +209,54 @@ during migration, and why it has to be resolvable from the appliance.
 That is a different thing from backup-to-tape, which identifies backup files natively
 within a repository and sends those to tape. Backup-to-tape is not affected.
 
-**Two limitations follow, and both are honest gaps rather than defects:**
+### Job-type detection — captured live 2026-08-11, and tightened
 
-1. **The job-type vocabulary is unconfirmed.** `VBRTapeJob`'s shape has never been
-   captured — no lab has had tape jobs — so the check identifies file-to-tape by matching
-   the substring `File` across the job's type strings. At least three tape job kinds exist
-   (`BackupToTape`, `FileToTape`, `ObjectToTape`, plus a legacy `TapeFilesJob`), and since
-   backup-to-tape operates on backup *files*, a type string such as "Backup files to tape"
-   would be matched and misreported. **No collision has been demonstrated** — but none has
-   been ruled out either, and this is the same shape as the AGT-003 `Mac`/"machine"
-   defect. Treat the detection as unvalidated.
+The shape was captured on a tape-equipped server carrying all four job kinds. Detection is
+now an **exact comparison** against `VBRJobType` on the PowerShell surface:
 
-2. **Whether the backup server is actually the source is not read.** The check reports any
-   file-to-tape job and hedges — "*if* this backup server is their source". A server whose
-   file-to-tape jobs all source from other file servers gets a next step that does not
-   apply to it.
+| Job | .NET type | `Type` | reported as file-to-tape |
+|---|---|---|---|
+| File to Tape Job | `VBRFileToTapeJob` | `FileToTape` | yes |
+| Backup to Tape Job | `VBRBackupToTapeJob` | `BackupToTape` | no |
+| GFS Backup to Tape Job | `VBRBackupToTapeJob` | `BackupToTape` | no |
+| Backup NAS to Tape Job | `VBRBackupToTapeJob` | `BackupToTape` | no |
 
-**If a tape environment ever becomes available, capture:** the real `Type`/`TypeToString`
-values (so the match can become an exact comparison, or move to the job object's .NET type
-name), whether `Get-VBRTapeJob` offers a server-side type filter, and how a job exposes its
-**source objects** — the last would let the check state that this server *is* a source
-rather than asking the operator to check, removing the hedge entirely. That is the same
-improvement STG-003 got by reading `FipsCompliantModeEnabled` instead of deferring.
+Three findings from that capture:
+
+1. **`TypeToString` does not exist** — on any job. The previous expression was
+   `"$($_.Type) $($_.TypeToString)" -match 'File'`, so half of it always evaluated to
+   nothing. It was harmless only because `Type` carries the signal alone. It is the
+   AGT-002/SEC-004 shape, and under `Set-StrictMode -Version 2` or higher, reading an
+   absent property **throws** — which this check's `catch` would have swallowed, reporting
+   "no file-to-tape jobs detected" on every server with tape. The tool sets StrictMode
+   nowhere, so this was latent rather than live. The property is no longer read.
+
+2. **The substring match was safe, but by luck of vocabulary.** Of all **37** `VBRJobType`
+   values, `FileToTape` is the only one containing "File", so `-match 'File'` was provably
+   equivalent to the exact comparison. Being right for a reason nobody chose is how the
+   AGT-003 `Mac`/"machine" defect happened, so it is now an exact comparison and a test
+   pins it with a `BackupFilesToTape` negative case.
+
+3. **Detection deliberately does NOT use the .NET type name.** `VBRFileToTapeJob` and
+   `VBRBackupToTapeJob` are distinct types and look like a cleaner signal, but those are
+   backend inflections and can change between releases. The **PowerShell cmdlet surface is
+   intentionally kept consistent across releases so existing scripts do not break**, which
+   makes the enum the stable contract — and is also why a capture taken on 13.1 is
+   authoritative for the 13.0.x sources this tool actually runs against.
+
+`Get-VBRTapeJob` exposes only `-Name`, so there is no server-side type filter and
+client-side filtering is the only route.
+
+**One limitation remains, and it is an honest gap rather than a defect:**
+
+**Whether the backup server is actually the source is not read.** The check reports any
+file-to-tape job and hedges — "*if* this backup server is their source". A server whose
+file-to-tape jobs all source from other file servers gets a next step that does not apply
+to it. **This is now known to be fixable:** `VBRFileToTapeObject` exposes `Path`,
+`SelectionType` and `Server` (a `CHost`), so the source is readable and the hedge could
+become a determination — the same improvement STG-003 got from reading
+`FipsCompliantModeEnabled`. It is not built, because it is new capability rather than a
+correctness fix.
 
 ## Note on STG-003 — the FIPS restriction is version-dependent, and about the *Linux* server
 
@@ -248,6 +286,32 @@ Because the restriction is conditional, so is the status: FIPS enabled → `Manu
 decision only the customer can make); FIPS disabled → `Warning` (nothing affected today,
 but enabling it later would mean checking the OS versions first); FIPS unreadable →
 `Manual`, saying so.
+
+### The Nimble OS version cannot be read — measured, not assumed (2026-08-10)
+
+The obvious improvement to this check would be to read the array's Nimble OS version and
+decide, instead of asking the operator to check it. **That is not possible: VBR does not
+record it.** Established on a live Nimble-integrated server, so it is a measurement rather
+than a failed guess at a property name:
+
+- `Get-NimbleHost` returns `Veeam.Backup.SanPlugin.Nimble.CNimbleHost` with eight
+  properties — `ConnPoints`, `Options`, `Type`, `Reference`, `Description`, `Info`,
+  `Name`, `Id`. No version among them.
+- `Options` (`CNimbleHostAuxOptions`) holds connection plumbing only: `RestApiPort`,
+  `NimbleGroupId`, `CertificateThumbprint`, `AdditionalAddresses`.
+- `Info.Options` — the XML blob VBR actually **persists** for the array — contains those
+  same four values and nothing more. This is the conclusive part: the version is not
+  hidden behind a lazy getter, it is simply not stored.
+- `Info.ApiVersion` is a `CDBHost+EApiVersion` enum reading `Unknown`, and is VBR's own
+  API-generation marker rather than array firmware.
+
+So the deferral stays, but it should be *specific*: the check must say that VBR does not
+expose the Nimble OS version and name where it comes from instead — the array's own
+management UI, or `group --info` on the array — rather than implying the operator failed
+to look somewhere obvious.
+
+**Do not re-probe this speculatively.** A future re-check is warranted only if the Nimble
+plug-in's object model changes.
 
 ### The other two Nimble limitations on that page are deliberately NOT checks
 
@@ -605,9 +669,11 @@ The three ratings mean different things, and the difference matters:
   finding and the no-finding direction where that was possible.
 - **mock-tested** — the detection logic is exercised by the test suite against a
   mocked object shape, in both directions, but **has never seen a real object of
-  this kind.** The lab has no NetApp, no storage plug-in, no Nimble, no CDP policy,
-  no Entra ID tenant and no Mac agent, so STG-001/002/003, JOB-001, DEP-003 and
-  AGT-003 fall here. A mocked shape proves the logic does what it intends; it
+  this kind.** The lab has no NetApp, no storage plug-in, no CDP policy, no Entra ID
+  tenant and no Mac agent, so STG-001/002, JOB-001, DEP-003 and AGT-003 fall here.
+  STG-003 left this group on 2026-08-10 when a Nimble-integrated server became
+  available; that same server carried no NetApp and no Universal Storage Plugin
+  system, so STG-001 and STG-002 did not come along with it. A mocked shape proves the logic does what it intends; it
   cannot prove the shape matches the product. Treat the *property and value
   vocabulary* of these checks as unconfirmed.
 - neither — the logic has not been exercised in either direction. **No check is currently in this state:

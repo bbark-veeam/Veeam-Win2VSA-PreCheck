@@ -8,7 +8,8 @@
     config/config.json (if present) with any CLI parameters, connects to the VBR
     server, runs all KB4800 checks, prints a console summary, and writes JSON +
     HTML reports to the output directory. Exits with a code reflecting the verdict
-    (0 ready/warnings, 1 action required, 2 migration blocked) for automation.
+    (0 ready/warnings, 1 action required, 2 migration blocked) for automation, or 3
+    if the run could not start and produced no report.
 
 .PARAMETER Server
     The WINDOWS VBR v13.0.x server to evaluate. Default 'localhost'. Run on the
@@ -55,13 +56,14 @@ $root = Split-Path -Parent $PSCommandPath
 # module-not-found error - copying this file on its own is the obvious mistake.
 $manifest = Join-Path $root 'VbrMigrationPrecheck' 'VbrMigrationPrecheck.psd1'
 if (-not (Test-Path $manifest)) {
-    throw @"
+    Write-Error @"
 Run-Precheck.ps1 requires the VbrMigrationPrecheck folder alongside it, and it was not found in:
   $root
 
 If you copied a single file to this machine, use the standalone build instead - it needs nothing
 beside it. Build it with ./Build-SingleFile.ps1, which writes dist\VbrMigrationPrecheck-<version>.ps1.
-"@
+"@ -ErrorAction Continue
+    exit 3
 }
 
 # Load the module fresh so edits are picked up between runs.
@@ -90,6 +92,13 @@ if ($OutputPath)                { $params.OutputPath = $OutputPath }  elseif ($c
 if ($ReportFormat)              { $params.ReportFormat = $ReportFormat } elseif ($cfg.ReportFormat) { $params.ReportFormat = $cfg.ReportFormat }
 if ($VerboseLog)                { $params.VerboseLog = $true }
 
-Invoke-VbrMigrationPrecheck @params
+# A run that cannot start exits 3, so it is distinguishable from ACTION REQUIRED (1).
+try {
+    Invoke-VbrMigrationPrecheck @params
+}
+catch {
+    Write-Error $_ -ErrorAction Continue
+    exit 3
+}
 
 exit ([int]$global:LASTPRECHECKEXITCODE)

@@ -137,10 +137,21 @@ self-contained HTML with invented data; open either in a browser.
 
 | Verdict | Condition | Exit code |
 |---|---|---|
+| *(run failed)* | the run could not start — **no report was written** | 3 |
 | MIGRATION BLOCKED | any Blocker | 2 |
 | ACTION REQUIRED | any Action, no Blocker | 1 |
 | REVIEW WARNINGS | only Warning / Manual / Info | 0 |
-| READY | all Pass / Skipped | 0 |
+| READY | all Pass / Skipped | 0 — never emitted, see below |
+
+**Exit code 3 means no report exists**, because a connect or module-import failure aborts
+before any verdict is reached. It is kept separate from `1` so that a server which produced
+nothing is not triaged as one that merely has actions.
+
+**READY is never emitted, by design.** Four-eyes authorization and trusted-domain
+authentication are not exposed to PowerShell at all, so those two checks always return
+Manual and the verdict never reaches READY. **REVIEW WARNINGS with only those two
+outstanding is a clean bill of health** — and the exit code is already 0, so automation is
+unaffected.
 
 A check that cannot read a feature **degrades to Manual or Info with the correct
 guidance — never to a false Pass.** Where a clear result is reported, it states what was

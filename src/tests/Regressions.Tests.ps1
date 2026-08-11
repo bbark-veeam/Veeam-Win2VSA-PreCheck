@@ -1350,8 +1350,10 @@ Describe 'PRE-002 machine reachability' {
 Describe 'PRE-003 file-to-tape source hostname' {
     BeforeEach { Reset-MockState }
 
+    # Mock shapes match the live capture: Type only, no TypeToString (that property
+    # does not exist on a real tape job).
     It 'raises a next step for a file-to-tape job, naming the short hostname' {
-        $global:MockTapeJobs = @([pscustomobject]@{ Name = 'Nightly file archive'; Type = 'FileToTape'; TypeToString = 'File to tape' })
+        $global:MockTapeJobs = @([pscustomobject]@{ Name = 'Nightly file archive'; Type = 'FileToTape' })
         $r = Invoke-Check 'Test-PreFileToTapeHostname'
         $r.Status | Should -Be 'NextStep'
         ($r.Evidence -join ';') | Should -Match 'Nightly file archive'
@@ -1359,20 +1361,29 @@ Describe 'PRE-003 file-to-tape source hostname' {
         $r.Recommendation | Should -Match 'BACKUP01'
     }
 
-    # ⚠️ WEAKER THAN IT LOOKS - read before trusting it. The check matches 'File' as a
-    # bare substring across the type strings, which is the same PATTERN as the AGT-003
-    # 'Mac'/"machine" defect. But unlike AGT-003, no collision has been demonstrated:
-    # VBRTapeJob's shape has never been captured (the lab has no tape jobs), so the values
-    # below are INVENTED and the negative case proves only that these particular strings
-    # do not collide.
-    #
-    # A collision is plausible: at least three tape job kinds exist (BackupToTape,
-    # FileToTape, ObjectToTape, plus a legacy TapeFilesJob), and backup-to-tape works on
-    # backup FILES - a TypeToString such as "Backup files to tape" would match 'File' and
-    # be reported as file-to-tape. Capture the real Type/TypeToString values if a tape
-    # environment ever becomes available, and tighten this to an exact comparison.
     It 'does not treat a backup-to-tape job as file-to-tape' {
-        $global:MockTapeJobs = @([pscustomobject]@{ Name = 'VM backup to tape'; Type = 'BackupToTape'; TypeToString = 'Backup to tape' })
+        $global:MockTapeJobs = @([pscustomobject]@{ Name = 'VM backup to tape'; Type = 'BackupToTape' })
+        (Invoke-Check 'Test-PreFileToTapeHostname').Status | Should -Be 'Skipped'
+    }
+
+    # The four job kinds seen live. GFS and NAS backup-to-tape both report Type
+    # BackupToTape, so only the one file-to-tape job may be reported.
+    It 'reports only the file-to-tape job from a mixed set' {
+        $global:MockTapeJobs = @(
+            [pscustomobject]@{ Name = 'File to Tape Job';       Type = 'FileToTape' }
+            [pscustomobject]@{ Name = 'Backup to Tape Job';     Type = 'BackupToTape' }
+            [pscustomobject]@{ Name = 'GFS Backup to Tape Job'; Type = 'BackupToTape' }
+            [pscustomobject]@{ Name = 'Backup NAS to Tape Job'; Type = 'BackupToTape' }
+        )
+        $r = Invoke-Check 'Test-PreFileToTapeHostname'
+        $r.Status | Should -Be 'NextStep'
+        $r.Evidence.Count | Should -Be 1
+        $r.Evidence[0] | Should -Be 'File to Tape Job'
+    }
+
+    # Pins the exact comparison: a substring match on 'File' would report this.
+    It 'does not match a job whose type merely contains the word File' {
+        $global:MockTapeJobs = @([pscustomobject]@{ Name = 'Legacy'; Type = 'BackupFilesToTape' })
         (Invoke-Check 'Test-PreFileToTapeHostname').Status | Should -Be 'Skipped'
     }
 

@@ -17,6 +17,50 @@ produces.
 ### Changed
 ### Fixed
 
+## [1.0.0] - 2026-08-11
+
+First stable release. 1.0.0 is a **trust** milestone rather than a feature one: every check
+is exercised by the test suite in both directions, every clean result states what it
+examined, and every confidence rating now says which paths its evidence actually covers.
+
+### Added
+- **Exit code `3` for a run that could not start.** A connect or module-import failure
+  produces no report at all, yet it previously exited `1` — indistinguishable from
+  ACTION REQUIRED. Across a large estate a server that produced nothing would be triaged as
+  one that merely has actions. Both routes to a failed start are covered by tests.
+
+### Changed
+- **PRE-003 identifies file-to-tape jobs by an exact comparison** against `VBRJobType` on the
+  PowerShell surface, rather than matching the substring `File` across two type strings.
+  Behaviour is unchanged on every job kind observed; the previous form was correct only by
+  luck of vocabulary, and read a property that does not exist.
+- **Confidence ratings now state which paths the evidence covers.** A rating of
+  "High — validated" said nothing about the unreadable path, which is precisely where three
+  checks were found broken at 0.8.2. AGT-002, JOB-003, SEC-004 and DEP-002 are now explicit
+  about what was validated live, what is mock-tested, and what cannot be validated at all.
+- **STG-003 is validated against a live HPE Nimble integration.** The FIPS-disabled path was
+  exercised on real hardware; the FIPS-enabled and unreadable paths remain mock-tested and
+  say so.
+
+### Fixed
+- PRE-003 no longer reads `TypeToString`, which does not exist on any tape job. It was
+  harmless only because `Type` carries the signal alone — and only while strict mode is off,
+  since reading an absent property throws under `Set-StrictMode -Version 2` or higher.
+
+### Known limitations, stated deliberately
+- **`READY` is never emitted.** Four-eyes authorization and trusted-domain authentication are
+  not exposed to PowerShell, so both checks always return `Manual` and the verdict ladder
+  never reaches `READY`. `REVIEW WARNINGS` with only those two outstanding is a clean bill of
+  health, and its exit code is already `0`.
+- **The Nimble OS version cannot be read.** VBR does not record it, so STG-003 asks for it to
+  be confirmed from the array rather than determining it.
+- **PRE-003 hedges on whether this server is the source** of its file-to-tape jobs. The source
+  is readable and this could become a determination; it was not built for 1.0.0 because it is
+  new capability rather than a correctness fix.
+- **SEC-005's post-migration claim is not yet confirmed by a physical migration test.** If a
+  prefixed assignment turns out to match by SID, the check over-flags — it errs toward telling
+  the operator to act, never toward a false clean result.
+
 ## [0.8.2] - 2026-08-07
 ### Fixed
 - **Three checks returned a confident clean result when their cmdlet threw.** Found by a

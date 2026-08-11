@@ -82,8 +82,9 @@ function Test-PreFileToTapeHostname {
     try {
         $tapeJobs = @(Get-VBRTapeJob -ErrorAction SilentlyContinue)
         $readTapeJobs = $true
+        # Exact comparison against the VBRJobType enum on the PowerShell surface.
         $fileToTape = @($tapeJobs |
-            Where-Object { "$($_.Type) $($_.TypeToString)" -match 'File' } |
+            Where-Object { "$($_.Type)" -eq 'FileToTape' } |
             ForEach-Object { $_.Name })
     } catch { }
 

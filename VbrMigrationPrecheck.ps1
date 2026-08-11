@@ -8,7 +8,8 @@
     config/config.json (if present) with any CLI parameters, connects to the VBR
     server, runs all KB4800 checks, prints a console summary, and writes JSON +
     HTML reports to the output directory. Exits with a code reflecting the verdict
-    (0 ready/warnings, 1 action required, 2 migration blocked) for automation.
+    (0 ready/warnings, 1 action required, 2 migration blocked) for automation, or 3
+    if the run could not start and produced no report.
 
 .PARAMETER Server
     The WINDOWS VBR v13.0.x server to evaluate. Default 'localhost'. Run on the
@@ -47,8 +48,8 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 0.8.2
-#  Built   : 2026-08-07 12:02:54
+#  Version : 1.0.0
+#  Built   : 2026-08-11 17:07:22
 #  Sources : 16 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
@@ -60,7 +61,7 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '0.8.2'
+$script:PrecheckVersion = '1.0.0'
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -1480,8 +1481,9 @@ function Test-PreFileToTapeHostname {
     try {
         $tapeJobs = @(Get-VBRTapeJob -ErrorAction SilentlyContinue)
         $readTapeJobs = $true
+        # Exact comparison against the VBRJobType enum on the PowerShell surface.
         $fileToTape = @($tapeJobs |
-            Where-Object { "$($_.Type) $($_.TypeToString)" -match 'File' } |
+            Where-Object { "$($_.Type)" -eq 'FileToTape' } |
             ForEach-Object { $_.Name })
     } catch { }
 
@@ -2763,7 +2765,14 @@ if ($OutputPath)                { $params.OutputPath = $OutputPath }  elseif ($c
 if ($ReportFormat)              { $params.ReportFormat = $ReportFormat } elseif ($cfg.ReportFormat) { $params.ReportFormat = $cfg.ReportFormat }
 if ($VerboseLog)                { $params.VerboseLog = $true }
 
-Invoke-VbrMigrationPrecheck @params
+# A run that cannot start exits 3, so it is distinguishable from ACTION REQUIRED (1).
+try {
+    Invoke-VbrMigrationPrecheck @params
+}
+catch {
+    Write-Error $_ -ErrorAction Continue
+    exit 3
+}
 
 exit ([int]$global:LASTPRECHECKEXITCODE)
 
