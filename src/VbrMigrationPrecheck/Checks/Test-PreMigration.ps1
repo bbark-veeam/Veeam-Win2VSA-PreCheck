@@ -42,10 +42,12 @@ function Test-PreMachineAccessibility {
     # we enumerate the managed infrastructure to make it concrete.
     $id = 'PRE-002'; $cat = 'Preparation'; $title = 'Machine reachability from the appliance'
 
-    $servers = @()
-    if (Test-PrecheckCmdlet 'Get-VBRServer') {
-        try { $servers = @(Get-VBRServer -ErrorAction SilentlyContinue) } catch { }
-    }
+    # Shares the cached inventory with DEP-004/DEP-006 rather than fetching its own
+    # copy: the server list was the last shared cmdlet in the tool still being read
+    # twice per run. Also gains the Ok flag, so an unreadable inventory can say so
+    # instead of silently presenting itself as an empty one.
+    $inv = Get-PrecheckManagedServer
+    $servers = @($inv.Server)
     $ev = @()
     if ($servers.Count -gt 0) {
         $ev = $servers | ForEach-Object {
@@ -53,10 +55,14 @@ function Test-PreMachineAccessibility {
             "Managed server: $($_.Name)$t"
         }
     }
-    $detail = if ($servers.Count -gt 0) {
+    # An unreadable inventory and an empty one used to produce the same sentence, which
+    # read as "there is nothing to check" in both cases. They are now distinct.
+    $detail = if (-not $inv.Ok) {
+        'The managed-server inventory could not be read, so this next step cannot list the machines it applies to. Confirm every machine managed by this deployment will be reachable from the VSA.'
+    } elseif ($servers.Count -gt 0) {
         "$($servers.Count) managed server(s)/host(s) are registered. Each must be reachable from the VSA after migration."
     } else {
-        'Confirm every machine managed by this deployment will be reachable from the VSA.'
+        'The managed-server inventory was read successfully and is empty. Confirm every machine managed by this deployment will be reachable from the VSA.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status NextStep `
         -Detail $detail `

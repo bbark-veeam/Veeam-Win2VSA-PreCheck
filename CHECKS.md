@@ -1,6 +1,6 @@
 # Checks Reference — KB4800 coverage map
 
-> **KB4800 as captured 2026-08-04.** It is a living document, so its guidance can
+> **KB4800 as captured 2026-09-10.** It is a living document, so its guidance can
 > change with a new release. Every report states this date, from the
 > `$script:PrecheckKbCaptured` constant in `VbrMigrationPrecheck/Private/New-PrecheckResult.ps1`
 > — update it there whenever the KB is re-read and these checks are reconciled
@@ -18,6 +18,9 @@ against a real environment (see the caveat at the bottom).
 | DEP-001 | Deployment | Cloud Connect deployments cannot migrate. Read from the licence itself (`.CloudConnect` = Enabled/Disabled/Enterprise/Invalid); tenants and gateways enrich the evidence | `Get-VBRInstalledLicense`, `Get-VBRCloudTenant`, `Get-VBRCloudGateway` | Pass / Blocker / Info | High — validated live in both directions (Disabled → Pass, Enterprise → Blocker) |
 | DEP-002 | Deployment | Google Cloud plug-in config will not migrate (Windows-only). Detected from CONFIGURATION (`Get-VBRGoogleCloudAccount`, `Get-VBRGoogleCloudComputeAccount`) plus a job-name signal. The plug-in ships with VBR so installation proves nothing; external repositories are not examined | `Get-VBRGoogleCloud*Account`, `Get-VBRJob` | Pass / Warning / Manual | Medium — the **no-configuration** path validated live (2 configuration sources read, job names swept, clean result counted); the **finding** path is mock-tested only, as no Google Cloud account has been available in any environment. The unreadable path degrades to `Manual` and is pinned by a test |
 | DEP-003 | Deployment | Entra ID tenant backup **data** not migrated | `Get-VBREntraIDTenant` | Pass / Manual / Info | Medium — mock-tested |
+| DEP-004 | Deployment | VSA does not support the **Hyper-V SCVMM High Availability** feature. Scoped to SCVMM being added to Veeam — no Hyper-V, or Hyper-V without SCVMM, is a clean `Pass`. Whether the HA feature is *in use* is not readable, so an SCVMM server is flagged for confirmation — see note | `Get-VBRServer` (`Type -eq 'Scvmm'`) | Pass / Manual | Medium — mock-tested; exact-enum filter and the unreadable path are both mutation-validated |
+| DEP-005 | Deployment | **Veeam Plug-in for oVirt** configuration cannot migrate — the plug-in is absent from VSA 13.0.x, the only train that supports migration. Keyed on `JobType -eq 'VmbApiPolicyTempJob'` + `TypeToString`, plus external-infrastructure hosts — see note | `Get-VBRJob`, `Get-VBRServer` | Pass / Manual | Medium — the **detection surface** is measured live (2026-09-23, a server carrying Nutanix AHV / Proxmox VE / HPE Morpheus plug-in jobs); the **oVirt vocabulary itself** is unconfirmed, so it cannot yet be a Blocker. Exact-enum filter and both unreadable paths are mutation-validated |
+| DEP-006 | Deployment | Linux-based backup servers do not support **Hyper-V workgroup clusters**. Domain membership is not readable, so a Hyper-V cluster is flagged for confirmation; a domain-joined cluster needs no action — see note | `Get-VBRServer` (`Type -eq 'HvCluster'`) | Pass / Manual | Medium — mock-tested; the `HvServer`/`HvCluster` negative case and the unreadable path are both mutation-validated |
 | AGT-001 | Agents | All agents must be v13+ to connect | `Get-VBRDiscoveredComputer` | Pass / Action / Manual | High — validated |
 | AGT-002 | Agents | Disabled agent policies must be applied/synced first. Keyed on `JobEnabled` (NOT `IsEnabled`, which does not exist; NOT `ScheduleEnabled`, which is a different thing). Whether config was applied is not exposed at all — see note | `Get-VBRComputerBackupJob` | Pass / Action / Manual / Info | High — the **enabled** and **disabled** paths validated live on real policies. The **unreadable-enumeration** path returned a false Pass until 0.8.2; it now degrades to `Manual` and is pinned by a mutation-validated test. Whether config was applied is not exposed at all — see note |
 | AGT-003 | Agents | Mac agent domain accounts must become local (no Kerberos/NTLM) | `Get-VBRComputerBackupJob` | Pass / Manual | Low - mock-tested; platform vocabulary still unconfirmed |
@@ -31,7 +34,7 @@ against a real environment (see the caveat at the bottom).
 | JOB-003 | Jobs | Pre/post-job + pre-freeze/post-thaw scripts & CSVs copied manually. Reads all three surfaces — see note below. CSV files remain undetectable and are named as such | `Get-VBRJob`, `Get-VBRJobObject` | Pass / Manual | High — all **three script surfaces** validated live on a real job carrying four scripts (pre/post-job, and pre-freeze/post-thaw set per-machine), attributed to the right job and machine. The **unreadable-enumeration** path returned a false Pass claiming all three surfaces were read until 0.8.2; it now degrades to `Manual` and is pinned by a test. CSV files remain undetectable by design |
 | SEC-001 | Security | Four-eyes authorization disabled during migration | none exists → manual | Manual | n/a — permanently manual, now **confirmed by measurement** (2026-08-10): `Get-VBRSecurityOptions` carries exactly six properties and none relates to four-eyes. A test pins it so it cannot become a Pass |
 | SEC-002 | Security | **Datacenter Credential Formatting** — non-UPN **Standard** credentials to review for Kerberos-authenticated connections | `Get-VBRCredentials` | Pass / Manual | Medium — see note |
-| SEC-003 | Security | Trusted-domain authentication unsupported | (manual) | Manual | n/a — permanently manual; a test pins it so it cannot become a Pass |
+| SEC-003 | Security | Trusted-domain authentication unsupported. Scoped by the **precondition**, not the principals: a domain with no trust relationship cannot hit the limitation → `Pass` — see note | `System.DirectoryServices.ActiveDirectory` (no RSAT) | Pass / Manual | Medium — the **no-trust** path validated live on a domain-joined 13.0.3 server (2026-09-14); the **trust-present** path is mock-tested, as the validating domain had none. The unreadable path is mutation-validated |
 | SEC-004 | Security | Local (non-domain) repo access accounts → "SID not found" | `Get-VBREPPermission` -Repository → `.Users` | Pass / Action / Manual / Info | High — the **flagging** and **clean** paths both validated live on real repositories. The **unreadable-enumeration** path returned a false Pass reading "0 repository/repositories were checked" until 0.8.2; it now degrades to `Manual` and is pinned by a test whose assertion discriminates between the two unreadable branches |
 | SEC-005 | Security | Console role assignments must be UPN (appliance console login) — see note | `Get-VBRUserRoleAssignment` | Pass / Action / Manual | High — validated live: all three source shapes flagged with distinct reasons, and both appliance remediation forms confirmed on real appliances |
 | DB-001 | Job history | Job-history sessions predating the **upgrade to v12** fail migration (the limiting factor is v11-and-earlier session data). **Scoped to a Microsoft SQL configuration database** — see note | `Get-VBRHistoryOptions`, registry `DatabaseConfigurations` | Pass / Action / Manual / Info | High — Pass and Action validated live; the PostgreSQL scoping is shape-confirmed on a real server |
@@ -102,11 +105,16 @@ verdict is reached. It is separated from `1` deliberately: at fleet scale a serv
 nothing must not be triaged as one that merely has actions.
 
 **READY is structurally unreachable, and that is accepted and deliberate.** SEC-001 (four-eyes)
-and SEC-003 (trusted-domain authentication) return `Manual` unconditionally — neither is exposed
-to PowerShell at all — and the ladder demotes on any `Manual`, so no server can score `READY`.
-**`REVIEW WARNINGS` with only SEC-001 and SEC-003 outstanding is a clean bill of health.** The
+returns `Manual` unconditionally — four-eyes state is not exposed to PowerShell at all — and the
+ladder demotes on any `Manual`, so no server can score `READY`.
+**`REVIEW WARNINGS` with only SEC-001 outstanding is a clean bill of health.** The
 exit code is already `0`, so automation is unaffected. A test pins this so the verdict cannot
 silently become reachable.
+
+> ⚠️ **This rested on TWO checks until 2026-09-14.** SEC-003 was also unconditional until it
+> gained a `Pass` path, so the guarantee now rests on SEC-001 alone. Nothing about the verdict
+> changed — but if SEC-001 ever becomes readable, `READY` becomes reachable and the roadmap
+> decision to accept it needs revisiting rather than the test being edited.
 
 ## Note on DB-001 — the failure is scoped to a Microsoft SQL configuration database
 
@@ -119,6 +127,12 @@ So on a **PostgreSQL** configuration database the limitation cannot apply, and D
 returns `Pass` outright rather than asking the operator to compare a retention window
 against an upgrade date that could never produce a finding. PostgreSQL became available in
 v11 (by manual migration) and the default at v12 install, so this is common.
+
+**The 2026-09-10 revision corroborates this scoping.** It added a note stating that the
+source configuration database may be either Microsoft SQL or PostgreSQL, and that the
+restore converts it into the appliance's local PostgreSQL instance. That is consistent with
+the limitation being a property of the *Microsoft SQL* source data rather than of migration
+in general — so the scoping narrows the check correctly, and no code change follows from it.
 
 The engine is read from the registry:
 `HKLM\SOFTWARE\Veeam\Veeam Backup and Replication\DatabaseConfigurations` →
@@ -168,6 +182,143 @@ change the result: the license file itself prevents migration, whether or not an
 Connect architecture has been built."* The evidence also distinguishes **"could not be
 read"** from **zero**, so an unreadable enumeration is never presented as an empty one.
 
+## Note on SEC-003 — scoped by the precondition, because the principals cannot settle it
+
+KB4800 scopes this to **two** surfaces: *"user accounts specified in Users and Roles **and the
+Credentials Manager**."*
+
+**Reading those principals cannot settle it, and the check deliberately does not try.** A
+domain-local or universal group in this domain may contain foreign security principals from
+across a trust, and **group membership is not readable from here** — so "every assignment names
+a principal in one domain" proves nothing. Excluding `BUILTIN\Administrators` from such an
+analysis makes it worse rather than better: on a domain-joined server that is the entry most
+likely to span a trust, and removing the riskiest unknown before declaring the rest clean is how
+a false clean result gets built.
+
+**So the check proves the precondition is absent instead.** If the domain participates in no
+trust at all, no principal on *either* surface can be authenticating across one — which covers
+both of KB4800's surfaces at once rather than half of them. Same move as DB-001's PostgreSQL
+scoping: when the precondition cannot exist, stop deferring.
+
+### Measured on a domain-joined Windows VBR 13.0.3, 2026-09-14
+
+Four findings, two of which constrain
+the implementation:
+
+1. **It works with no RSAT.** The `ActiveDirectory` module was absent and every call still
+   succeeded — `System.DirectoryServices.ActiveDirectory` ships with the framework. This was the
+   load-bearing question: a check requiring RSAT would not be viable on a typical VBR server.
+2. **Fast enough for a fleet.** Domain 33 ms, forest 3 ms, trust enumeration 19 ms and 5 ms. No
+   timeout needed. (For contrast, `Get-VBRUserRoleAssignment` on the same box took **6.8
+   seconds** — see below.)
+3. **⚠️ A trust-free domain is indistinguishable from a failed call by its return value.** An
+   empty collection unrolls, so it arrives as `$null` exactly as a failure would. **The call not
+   throwing is the only sound discriminator**, and a test pins that in both directions.
+4. **⚠️ The `[...ActiveDirectory.Domain]` type resolves even where AD is completely unusable** —
+   confirmed on macOS, where only the *call* fails, wrapped in a generic
+   `MethodInvocationException`. A type-availability guard proves nothing.
+
+**Both domain and forest level are read.** The domain object reports trusts this domain
+participates in, including the automatic parent/child trusts inside a multi-domain forest; the
+forest object reports forest-level external and forest trusts. Either is a route for a principal
+from another domain to authenticate, so both must be empty for a `Pass`.
+
+**Not domain-joined is not a clean pass.** A workgroup backup server has no domain of its own to
+read trusts from, but its Credentials Manager can still hold domain accounts.
+
+**What remains unvalidated:** the trust-present path. The validating domain had none, so trust
+property names (`TargetName`, `TrustType`, `TrustDirection`) are documented .NET members that
+have never been seen on a real trust. They are read defensively and a missing one degrades to
+"unreadable" rather than breaking the finding — but the *vocabulary* is unconfirmed.
+
+## Note on DEP-005 — the first implementation read the wrong cmdlet entirely
+
+**Measured 2026-09-23** on a 13.1.1.18 appliance carrying three hypervisor plug-in jobs —
+Nutanix AHV, Proxmox VE and HPE Morpheus VM Essentials.
+
+### ⚠️ `Get-VBRPluginJob` returned ZERO on that server
+
+The check's original primary signal **would never have fired**. `Get-VBRPluginJob` covers the
+standalone **enterprise database** plug-ins — Oracle RMAN, SAP HANA, MSSQL — not hypervisor
+integrations. A plausible cmdlet name returning nothing while reporting a confident clean
+result is this tool's signature defect; this is the sixteenth, and the first caught *before*
+shipping rather than after.
+
+### What actually identifies a hypervisor plug-in job
+
+| Property | Value observed | Use |
+|---|---|---|
+| `JobType` | **`VmbApiPolicyTempJob`** | all three plug-ins share it — the exact enum to filter on |
+| `BackupPlatform` | `ECustomPlatform` | shared by all custom platforms; a `CPlatform` **class**, not an enum, so it cannot name which |
+| **`TypeToString`** | **`"Proxmox Backup"`** | **the platform discriminator** — a free-form `String` |
+
+The three plug-in jobs in the console matched `VmbApiPolicyTempJob` ×3 exactly. Plug-in
+*infrastructure* registers as `ExternalInfrastructureServer` (a Nutanix cluster appeared that
+way), which is also read — closing the old blind spot where oVirt registered with no job was
+invisible. That type is shared with Azure and others, so it is reported as a candidate, never
+as a finding.
+
+### Why this is still `Manual` and not the `Blocker` its severity justifies
+
+**oVirt's exact `TypeToString` value cannot be reflected.** It is a free-form string, not an
+enum. Six enums were dumped in full — `EDbJobType` (267 values), `ESourceType`, `ETargetType`,
+`EType`, `EApiVersion`, `EInitialConnectionMethod` — and **none contains an oVirt or RHV
+member**, so the enum-reflection shortcut that settled PRE-003 does not work here. Guessing
+"oVirt Backup" from "Proxmox Backup" is exactly the AGT-003 `Mac`-matches-"machine" mistake.
+**A real oVirt sighting is still required before this becomes a Blocker.**
+
+### ⚠️ The console's Type column is NOT `TypeToString`
+
+The console displays **"Proxmox VE Backup"**; the property reads **"Proxmox Backup"**. Never
+build a check from a screenshot of the console.
+
+### One thing this capture cleared
+
+`TypeToString` **does exist on `VBRJob`** (it read `"VMware Backup"`). DEP-002 matches on
+`"$($_.JobType) $($_.TypeToString) $($_.Name)"`, and there was a live suspicion that it carried
+the same ghost-property defect as PRE-003 — where `TypeToString` does not exist on
+`VBRTapeJob` at all. **It does not. DEP-002 is sound**, and that suspicion is closed.
+
+## Note on DEP-004 / DEP-005 / DEP-006 — the three limitations KB4800 added on 2026-09-10
+
+The 2026-09-10 revision added three limitations. **None of them is fully readable from
+Veeam PowerShell**, so each check proves what it can and defers the rest explicitly. The
+bound is stated in the check's own output rather than left for the reader to assume.
+
+**DEP-004 — SCVMM.** The limitation is the *High Availability feature*, not SCVMM itself.
+There is **no `Get-VBRHvScvmm`** — only `Add-` and `Set-` — so SCVMM is reachable only as a
+`VBRHostType` on `Get-VBRServer`. The check is therefore **scoped to SCVMM being added to
+Veeam**: a deployment with no Hyper-V, or with Hyper-V managed without SCVMM, is a clean
+`Pass` and the detail says which of those two applies. Only an SCVMM server produces a
+`Manual`, and it says plainly that whether the HA feature is in use could not be read.
+
+**DEP-005 — oVirt.** See the dedicated note below; the first implementation read the wrong
+cmdlet entirely and would never have fired.
+
+**DEP-006 — workgroup clusters.** "Workgroup" means the cluster is **not domain-joined**,
+and that is not exposed. **Do not infer it from the name** — SEC-004 established that a
+dotted name and a NetBIOS-style label are indistinguishable as shapes, and guessing either
+way is harmful at fleet scale. So cluster *presence* is reported and domain membership is
+left to the operator. Because most Hyper-V clusters are domain-joined and therefore
+unaffected, the finding says so explicitly rather than implying every cluster is a problem.
+
+### Why `Manual` and not silence
+
+All three fire on estates that may be entirely fine. That is deliberate: `Manual` never
+changes the exit code (the ladder puts it in `REVIEW WARNINGS`, exit `0`) and `READY` is
+already structurally unreachable, so the cost is one report line. Staying silent about a
+limitation the tool cannot rule out is the worse failure.
+
+### A defect found while building these, worth not repeating
+
+The helper these checks share originally returned `$null` when the inventory could not be
+read and `@()` when it read an empty one. **Those are the same value at the call site** —
+PowerShell unrolls an empty array on return, so `return @()` arrives as `$null` — which
+collapsed "could not be read" into "read, found none", the exact false-clean-result class
+this tool has hit fourteen times. It now returns a `pscustomobject` carrying an explicit
+`Ok` flag, which never unrolls. **The mutation that exposed this passed the test suite
+silently**; only flipping `Ok` proved the guards were real.
+
 ## Deliberately NOT checked, and why
 
 Identified in the KB4800 re-read of 2026-08-06 and consciously left out, recorded here so
@@ -182,6 +333,14 @@ malware-scanning index rebuilds making the first run longer; custom-role job own
 transferring to the primary admin; remote Linux mount servers and repository mount settings
 needing credential updates; Cloud Connect repositories needing a Windows mount server for
 certain Explorers.
+
+**The general storage-snapshot caveat.** KB4800 warns that storage snapshot integration
+support "may differ" between a Windows deployment and the appliance — hardened on
+2026-09-10 to "**may be affected or outright unsupported**". It names no specific system and
+prescribes no test, pointing the reader at the User Guide instead, so there is nothing to
+detect per server. The systems it *does* name specifically are already checks: STG-001
+(NetApp ONTAP), STG-002 (IBM / Hitachi / HPE XP / NEC) and STG-003 (Nimble/Alletra FIPS).
+The hardened wording raises the stakes of that manual review; it does not create a signal.
 
 **External product integrations.** Veeam ONE (remove the old server, add the appliance,
 historical data is lost), Veeam Recovery Orchestrator, Service Provider Console, and
@@ -677,7 +836,7 @@ The three ratings mean different things, and the difference matters:
   cannot prove the shape matches the product. Treat the *property and value
   vocabulary* of these checks as unconfirmed.
 - neither — the logic has not been exercised in either direction. **No check is currently in this state:
-  all 25 are exercised by the test suite in both directions.** That
+  all 29 are exercised by the test suite in both directions.** That
   raises the floor; it does not by itself raise any row's rating, because a mocked shape
   still cannot prove the shape matches the product.
 

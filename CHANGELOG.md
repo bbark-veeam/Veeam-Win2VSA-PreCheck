@@ -17,6 +17,79 @@ produces.
 ### Changed
 ### Fixed
 
+## [1.1.0] - 2026-09-14
+
+**KB4800 was revised on 2026-09-10, adding three limitations.** This release reconciles the
+checks against that revision; the capture date stamped into every report advances from
+`2026-08-04` to `2026-09-10`.
+
+The change set was established by diffing the live article against an archived snapshot
+whose own "Last Updated" reads `2026-08-04` — the exact date the previous release was built
+against — so it is complete rather than a sample. **22 of the 26 existing checks map to KB
+text that did not change at all**, and no existing check changed its verdict logic.
+
+### Added
+- **DEP-004 — Hyper-V SCVMM.** The appliance does not support the Hyper-V SCVMM High
+  Availability feature. The check is scoped to SCVMM being *added to Veeam*: a deployment
+  with no Hyper-V, or with Hyper-V managed without SCVMM, is a clean `Pass` whose detail
+  says which of the two applies. Whether the HA feature is actually in use is not exposed
+  to PowerShell anywhere, so an SCVMM server is reported `Manual` for confirmation and says
+  so plainly rather than implying a finding was made.
+- **DEP-005 — Veeam Plug-in for oVirt.** Its configuration cannot be migrated, because the
+  plug-in is not available for the Veeam Software Appliance 13.0.x releases that support
+  migration. **No oVirt-specific cmdlet exists**, so the check reads two indirect signals —
+  the plug-in job inventory (shared by every plug-in integration) and job names — and its
+  clean result states the bound it cannot cross: oVirt infrastructure registered without any
+  job would not be visible to it.
+- **DEP-006 — Hyper-V workgroup clusters.** Not supported on a Linux-based backup server.
+  Whether a cluster is domain-joined is not readable and is deliberately not guessed from
+  its name, so cluster presence is reported and membership left to the operator. A
+  domain-joined cluster is unaffected, and the finding says so rather than implying every
+  Hyper-V cluster is a problem.
+
+### Changed
+- **The managed-server inventory is read once per run.** `Get-VBRServer` was the last shared
+  cmdlet still being fetched twice - cached for DEP-004/DEP-006, then read again uncached by
+  PRE-002. All three now share one cached read, and the shared reader moved to `Private/`.
+  Measured context, so the size of this is not overstated: a real 13.0.3 run takes ~6s end to
+  end, of which ~4s is the connect, so this is hygiene rather than a hot path. It gets a test
+  because nothing in any check's OUTPUT changes if the cache is dropped again.
+- **PRE-002 tells an unreadable inventory apart from an empty one.** Both produced the same
+  sentence, which read as "there is nothing to check" in both cases.
+- **SEC-003 is no longer permanently Manual — it can now Pass.** It was unconditional because
+  trusted-domain authentication is not exposed to Veeam PowerShell. It still is not; what changed
+  is the question asked. Rather than inspecting principals — which cannot settle it, because a
+  group in this domain may contain members from a trusted one and group membership is not readable
+  — the check proves the **precondition is absent**: a domain participating in no trust at either
+  domain or forest level cannot hit the limitation, so it `Pass`es. That covers **both** surfaces
+  KB4800 names (Users and Roles *and* the Credentials Manager) rather than half of them. Reads
+  Active Directory through the framework, so **no RSAT is required**, and costs about 60 ms.
+  A server whose trust list cannot be read, or that is not domain-joined, still reports `Manual` —
+  never a Pass. The published clean example drops from two Manuals to one.
+- **ENV-001 leads with the latest-patch requirement.** KB4800 pins a specific build on both
+  sides of the migration and advances it with each patch release. The check still names the
+  exact appliance version the target must run, but now sequences the advice: confirm this
+  build is the latest 13.0.x patch first, then match the appliance to it — or patch this
+  server first and match whatever it reports afterwards. No build number is hardcoded, which
+  would go stale at the next patch.
+
+### Fixed
+- **DEP-005 read the wrong cmdlet entirely and would never have fired.** Its primary signal
+  was `Get-VBRPluginJob`, which on a measured server carrying three hypervisor plug-in jobs
+  (Nutanix AHV, Proxmox VE, HPE Morpheus) returned **zero** - that cmdlet covers the
+  standalone enterprise *database* plug-ins, not hypervisor integrations. It now keys on
+  `Get-VBRJob` with `JobType -eq 'VmbApiPolicyTempJob'` and reads the platform name from
+  `TypeToString`, and additionally reports `ExternalInfrastructureServer` hosts - closing
+  the old blind spot where oVirt registered with no job was invisible. Caught by measuring
+  the shape before release rather than after.
+- **A false-clean-result defect in the new checks' shared inventory helper, caught by
+  mutation testing before release.** It returned `$null` when the server inventory could not
+  be read and `@()` when it read an empty one — **the same value at the call site**, because
+  PowerShell unrolls an empty array on return — which collapsed "could not be read" into
+  "read, found none". It now returns an object carrying an explicit success flag, which
+  never unrolls. The mutation that exposed this passed the suite silently; only flipping the
+  flag proved the guards were real.
+
 ## [1.0.0] - 2026-08-11
 
 First stable release. 1.0.0 is a **trust** milestone rather than a feature one: every check

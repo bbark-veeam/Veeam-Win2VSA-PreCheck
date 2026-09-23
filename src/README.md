@@ -7,7 +7,7 @@
 **This folder is the source of truth. The script in the repository root is generated from
 it.**
 
-The precheck is developed as a module because 25 checks in one file are hard to
+The precheck is developed as a module because 29 checks in one file are hard to
 navigate, and it is *distributed* as a single script because customers run it
 unattended on a large number of servers and copying a folder tree causes mistakes.
 

@@ -37,13 +37,13 @@
   <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
   <div class="meta">Server: BACKUP02.corp.local &nbsp;|&nbsp;
     Build: Veeam Backup &amp; Replication 13.1.0.411 &nbsp;|&nbsp;
-    Generated: 2026-08-11 17:07:57 -04:00 &nbsp;|&nbsp;
-    Precheck version: 1.0.0 &nbsp;|&nbsp;
-    Reference: KB4800 (captured 2026-08-04)</div>
+    Generated: 2026-09-23 12:51:20 -04:00 &nbsp;|&nbsp;
+    Precheck version: 1.1.0 &nbsp;|&nbsp;
+    Reference: KB4800 (captured 2026-09-10)</div>
 </header>
 <div class="wrap">
   <div class="verdict">MIGRATION BLOCKED</div>
-  <div class="counts">26 checks &nbsp;&bull;&nbsp; Blocker 3 &nbsp;&bull;&nbsp; Action 5 &nbsp;&bull;&nbsp; Warning 2 &nbsp;&bull;&nbsp; Manual 7 &nbsp;&bull;&nbsp; NextStep 2 &nbsp;&bull;&nbsp; Info 0 &nbsp;&bull;&nbsp; Pass 5 &nbsp;&bull;&nbsp; Skipped 2</div>
+  <div class="counts">29 checks &nbsp;&bull;&nbsp; Blocker 3 &nbsp;&bull;&nbsp; Action 5 &nbsp;&bull;&nbsp; Warning 2 &nbsp;&bull;&nbsp; Manual 10 &nbsp;&bull;&nbsp; NextStep 2 &nbsp;&bull;&nbsp; Info 0 &nbsp;&bull;&nbsp; Pass 5 &nbsp;&bull;&nbsp; Skipped 2</div>
   <div class="card">
     <table>
       <thead><tr><th>Status</th><th>ID</th><th>Check</th><th>Category</th></tr></thead>
@@ -204,6 +204,39 @@
 </tr>
 <tr>
   <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">DEP-004</td>
+  <td>
+    <div class="title">Hyper-V SCVMM</div>
+    <div class="detail">1 System Center Virtual Machine Manager server(s) are connected to this deployment. The Veeam Software Appliance does not support the Hyper-V SCVMM High Availability feature. Whether that feature is actually in use is NOT readable from Veeam PowerShell, so this is flagged for confirmation rather than reported as a finding.</div>
+    <div class='rec'>&#8594; Confirm in SCVMM whether the High Availability feature is in use. If it is, that configuration is not supported on the Veeam Software Appliance and must be resolved with Veeam Support before migrating.</div>
+    <ul class='ev'><li>SCVMM server: scvmm01.corp.local</li></ul>
+  </td>
+  <td class="cat">Deployment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">DEP-005</td>
+  <td>
+    <div class="title">Veeam Plug-in for oVirt</div>
+    <div class="detail">Configuration that appears to belong to the Veeam Plug-in for oVirt was found on this server. Any configuration associated with the Veeam Plug-in for oVirt will NOT migrate, because the plug-in is not available for the Veeam Software Appliance 13.0.x releases that support migration.</div>
+    <div class='rec'>&#8594; Confirm whether any item below belongs to the Veeam Plug-in for oVirt. If so, it cannot be migrated: either remove all oVirt configuration before migrating and rebuild it after upgrading the appliance, or stay on the Windows deployment until a release supports both the plug-in and migration. Items belonging to other plug-in platforms (Proxmox, Nutanix, HPE Morpheus) are unaffected by this limitation.</div>
+    <ul class='ev'><li>Plug-in job: oVirt production [oVirt Backup]</li></ul>
+  </td>
+  <td class="cat">Deployment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
+  <td class="mono">DEP-006</td>
+  <td>
+    <div class="title">Hyper-V workgroup cluster</div>
+    <div class="detail">1 Hyper-V cluster(s) are connected to this deployment. Linux-based backup servers do not support Hyper-V WORKGROUP clusters. Whether a cluster is domain-joined is NOT readable from Veeam PowerShell, so this is flagged for confirmation - a domain-joined Hyper-V cluster is unaffected and needs no action.</div>
+    <div class='rec'>&#8594; Confirm whether any cluster below is a workgroup (non-domain-joined) cluster. If one is, it cannot be managed from the Veeam Software Appliance and must be domain-joined or excluded before migrating. Domain-joined clusters require no action.</div>
+    <ul class='ev'><li>Hyper-V cluster: hvcluster01.corp.local</li></ul>
+  </td>
+  <td class="cat">Deployment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#2980b9">Manual</span></td>
   <td class="mono">SEC-001</td>
   <td>
     <div class="title">Four-eyes authorization</div>
@@ -229,9 +262,9 @@
   <td class="mono">SEC-003</td>
   <td>
     <div class="title">Trusted-domain authentication</div>
-    <div class="detail">The Veeam Software Appliance does not support trusted-domain authentication.</div>
-    <div class='rec'>&#8594; Confirm no credentials/servers authenticate across a domain trust (accounts from a trusted, non-primary domain). Such access must be reworked before migration.</div>
-    
+    <div class="detail">This domain participates in 1 trust relationship(s), so trusted-domain authentication is possible here and the Veeam Software Appliance does not support it. Which accounts actually authenticate across a trust cannot be determined from this server - a group in this domain can contain members from a trusted one, and group membership is not readable.</div>
+    <div class='rec'>&#8594; Confirm no credentials or servers authenticate across a domain trust (accounts from a trusted, non-primary domain). Such access must be reworked before migration.</div>
+    <ul class='ev'><li>Trust: legacy.corp.local [External, Bidirectional]</li></ul>
   </td>
   <td class="cat">Security</td>
 </tr>
@@ -262,7 +295,7 @@
   <td class="mono">JOB-003</td>
   <td>
     <div class="title">Job and guest-processing scripts</div>
-    <div class="detail">None of the 1 job(s) on this server has a script configured - pre/post-job commands, job-level guest scripts, and per-machine guest script overrides were all checked. CSV files read by a job cannot be detected; confirm those by hand.</div>
+    <div class="detail">None of the 2 job(s) on this server has a script configured - pre/post-job commands, job-level guest scripts, and per-machine guest script overrides were all checked. CSV files read by a job cannot be detected; confirm those by hand.</div>
     
     
   </td>
@@ -327,9 +360,9 @@
 </li>
 <li class="nsitem">
   <div class="title"><span class="mono">PRE-002</span> &nbsp; Machine reachability from the appliance</div>
-  <div class="detail">3 managed server(s)/host(s) are registered. Each must be reachable from the VSA after migration.</div>
+  <div class="detail">5 managed server(s)/host(s) are registered. Each must be reachable from the VSA after migration.</div>
   <div class='rec'>&#8594; Before migrating, verify network connectivity, firewall rules, and DNS resolution from the Veeam Software Appliance to every managed machine (hosts, proxies, repositories, agents).</div>
-  <ul class='ev'><li>Managed server: backup01.corp.local [Local]</li><li>Managed server: proxy01.corp.local [Windows]</li><li>Managed server: repo01.corp.local [Linux]</li></ul>
+  <ul class='ev'><li>Managed server: backup01.corp.local [Local]</li><li>Managed server: proxy01.corp.local [Windows]</li><li>Managed server: repo01.corp.local [Linux]</li><li>Managed server: scvmm01.corp.local [Scvmm]</li><li>Managed server: hvcluster01.corp.local [HvCluster]</li></ul>
 </li>
     </ul>
   </div>

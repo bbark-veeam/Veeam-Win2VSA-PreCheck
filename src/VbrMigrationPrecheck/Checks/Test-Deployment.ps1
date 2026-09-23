@@ -1,6 +1,8 @@
 # Deployment-shape checks: configurations that block or partially block a whole
 # deployment from migrating.
-# KB4800: "Cloud Connectivity", "Google Cloud Integration", "Entra ID Tenant Backups".
+# KB4800: "Cloud Connectivity", "Google Cloud Integration", "Entra ID Tenant Backups",
+# "Hyper-V SCVMM High Availability", "Veeam Plug-in for oVirt", "Hyper-V workgroup
+# clusters" (the last three added to KB4800 on 2026-09-10).
 
 function Test-CloudConnect {
     [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
@@ -168,4 +170,175 @@ function Test-EntraIdBackups {
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
         -Detail 'The Entra ID tenant inventory on this server was read successfully and is empty, so no Entra ID backup data is affected by the migration.'
+}
+
+function Test-ScvmmHighAvailability {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
+
+    $id = 'DEP-004'; $cat = 'Deployment'; $title = 'Hyper-V SCVMM'
+
+    # KB4800 (2026-09-10): the Veeam Software Appliance does not support the Hyper-V
+    # SCVMM High Availability feature.
+    #
+    # ⚠️ Whether the HA FEATURE is in use is not exposed anywhere on the PowerShell
+    # surface - there is no Get-VBRHvScvmm at all (only Add-/Set-), so SCVMM is
+    # reachable only as a host type on Get-VBRServer. This check therefore reports
+    # SCVMM PRESENCE and asks the operator to confirm the feature, rather than
+    # claiming a configuration it cannot read. Presence is provable; use is not.
+    #
+    # It fires on every SCVMM-managed Hyper-V estate by construction. That is
+    # intended: Manual never changes the exit code, and staying silent on a server
+    # that may carry an unsupported feature is the worse failure.
+    $inv = Get-PrecheckManagedServer
+    if (-not $inv.Ok) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'The managed-server inventory could not be read, so whether an SCVMM server is connected to this deployment is unknown.' `
+            -Recommendation 'Confirm by hand whether System Center Virtual Machine Manager is added to this deployment. The Veeam Software Appliance does not support the Hyper-V SCVMM High Availability feature.'
+    }
+    $servers = @($inv.Server)
+
+    $scvmm = Get-PrecheckServerOfType -Server $servers -Type 'Scvmm'
+    if ($scvmm.Count -gt 0) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$($scvmm.Count) System Center Virtual Machine Manager server(s) are connected to this deployment. The Veeam Software Appliance does not support the Hyper-V SCVMM High Availability feature. Whether that feature is actually in use is NOT readable from Veeam PowerShell, so this is flagged for confirmation rather than reported as a finding." `
+            -Recommendation 'Confirm in SCVMM whether the High Availability feature is in use. If it is, that configuration is not supported on the Veeam Software Appliance and must be resolved with Veeam Support before migrating.' `
+            -Evidence ($scvmm | ForEach-Object { "SCVMM server: $($_.Name)" })
+    }
+
+    # The limitation is scoped to SCVMM being added to Veeam, so both of these are a
+    # clean pass and the detail says which one applies: a deployment with no Hyper-V at
+    # all, and a Hyper-V deployment managed without SCVMM.
+    $hyperV = @(Get-PrecheckServerOfType -Server $servers -Type 'HvServer') +
+              @(Get-PrecheckServerOfType -Server $servers -Type 'HvCluster')
+    $scope = if ($hyperV.Count -eq 0) {
+        'No Hyper-V host or cluster is connected to this deployment at all.'
+    } else {
+        "$($hyperV.Count) Hyper-V host(s)/cluster(s) are connected, but none is managed through SCVMM."
+    }
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
+        -Detail "$($servers.Count) managed server(s) were enumerated and none is an SCVMM server. $scope The limitation applies only where SCVMM is added to Veeam, so it does not apply here."
+}
+
+function Test-OVirtPlugin {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
+
+    $id = 'DEP-005'; $cat = 'Deployment'; $title = 'Veeam Plug-in for oVirt'
+
+    # KB4800 (2026-09-10): oVirt plug-in configuration cannot be migrated, because the
+    # plug-in is not available for VSA 13.0.x - the only version that supports
+    # migration. (13.1 has the plug-in but not migration, so there is no version where
+    # both work; affected customers are told to stay on Windows for now.)
+    #
+    # ⚠️⚠️ THIS CHECK ORIGINALLY READ Get-VBRPluginJob AND WOULD NEVER HAVE FIRED.
+    # Measured 2026-09-23 on a 13.1.1.18 appliance carrying three hypervisor plug-in
+    # jobs (Nutanix AHV, Proxmox VE, HPE Morpheus): Get-VBRPluginJob returned ZERO.
+    # That cmdlet covers the standalone ENTERPRISE DATABASE plug-ins - Oracle RMAN, SAP
+    # HANA, MSSQL - not hypervisor integrations. A plausible cmdlet name returning
+    # nothing while reporting a confident clean result is this tool's signature defect,
+    # and it was caught only because the shape was measured before release.
+    #
+    # WHAT ACTUALLY IDENTIFIES A HYPERVISOR PLUG-IN JOB, measured on that server:
+    #   Get-VBRJob  ->  JobType      = VmbApiPolicyTempJob   (all three plug-ins)
+    #                   BackupPlatform = ECustomPlatform     (all three, a CPlatform
+    #                                    CLASS - not an enum - so it cannot name which)
+    #                   TypeToString = "Proxmox Backup"      <- the platform, a STRING
+    #
+    # So TypeToString is the discriminator. Two consequences:
+    #   1. It is a free-form string, NOT an enum, so oVirt's exact value cannot be
+    #      reflected. Six enums were dumped in full and none carries an oVirt member.
+    #      Do NOT guess the value from the Proxmox one - that is the AGT-003
+    #      'Mac'-matches-"machine" mistake. A real oVirt sighting is still required
+    #      before this can become the Blocker its KB severity justifies.
+    #   2. ⚠️ The CONSOLE'S Type column is NOT TypeToString. The console shows
+    #      "Proxmox VE Backup"; the property says "Proxmox Backup". Never build a
+    #      check from a screenshot.
+    $jobsOk = $false
+    $platformJobs = @()
+    if (Test-PrecheckCmdlet 'Get-VBRJob') {
+        try {
+            $allJobs = @(Get-PrecheckCached -Key 'Jobs' -Getter { Get-VBRJob -ErrorAction Stop })
+            # Exact enum comparison, never a substring - the PRE-003 rule.
+            $platformJobs = @($allJobs | Where-Object {
+                $_.PSObject.Properties['JobType'] -and "$($_.JobType)" -eq 'VmbApiPolicyTempJob'
+            })
+            $jobsOk = $true
+        }
+        catch { }
+    }
+
+    # Second signal, and it closes the old blind spot: plug-in infrastructure
+    # registered with NO job. Measured - a Nutanix cluster registers as
+    # ExternalInfrastructureServer. That type is shared with Azure and others, so it
+    # cannot name oVirt either; it is reported as a candidate, not a finding.
+    $inv = Get-PrecheckManagedServer
+    $extHosts = if ($inv.Ok) { @(Get-PrecheckServerOfType -Server $inv.Server -Type 'ExternalInfrastructureServer') } else { @() }
+
+    if (-not $jobsOk -or -not $inv.Ok) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Whether a plug-in platform is configured on this server could not be determined - the job list or the managed-server inventory could not be read.' `
+            -Recommendation 'Confirm by hand whether the Veeam Plug-in for oVirt is in use. Its configuration cannot be migrated, because the plug-in is not available for the Veeam Software Appliance 13.0.x releases that support migration.' `
+            -Evidence @("Job list: $(if ($jobsOk) { 'read' } else { 'could not be read' })",
+                        "Managed-server inventory: $(if ($inv.Ok) { 'read' } else { 'could not be read' })")
+    }
+
+    $ev = @()
+    foreach ($j in $platformJobs) {
+        $plat = if ($j.PSObject.Properties['TypeToString'] -and $j.TypeToString) { "$($j.TypeToString)" } else { 'platform not readable' }
+        $ev += "Plug-in job: $($j.Name) [$plat]"
+    }
+    foreach ($h in $extHosts) { $ev += "External infrastructure host: $($h.Name)" }
+
+    if ($ev.Count -gt 0) {
+        # Any oVirt-shaped wording upgrades the language, but the status stays Manual:
+        # the vocabulary is unconfirmed in both directions.
+        $looksOVirt = @($ev | Where-Object { $_ -match 'oVirt|RHV|Red\s*Hat' })
+        $lead = if ($looksOVirt.Count -gt 0) {
+            'Configuration that appears to belong to the Veeam Plug-in for oVirt was found on this server.'
+        } else {
+            "$($platformJobs.Count) plug-in platform job(s) and $($extHosts.Count) external-infrastructure host(s) are configured on this server. None names oVirt, but the exact wording oVirt uses has not been confirmed against a live oVirt deployment, so this is listed for a human to confirm rather than cleared."
+        }
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$lead Any configuration associated with the Veeam Plug-in for oVirt will NOT migrate, because the plug-in is not available for the Veeam Software Appliance 13.0.x releases that support migration." `
+            -Recommendation 'Confirm whether any item below belongs to the Veeam Plug-in for oVirt. If so, it cannot be migrated: either remove all oVirt configuration before migrating and rebuild it after upgrading the appliance, or stay on the Windows deployment until a release supports both the plug-in and migration. Items belonging to other plug-in platforms (Proxmox, Nutanix, HPE Morpheus) are unaffected by this limitation.' `
+            -Evidence ($ev | Sort-Object -Unique)
+    }
+
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
+        -Detail "No plug-in platform configuration found. The job list and the managed-server inventory were both read: no job carries the plug-in platform job type, and no external-infrastructure host is registered. The Veeam Plug-in for oVirt is therefore not configured here."
+}
+
+function Test-HyperVWorkgroupCluster {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
+
+    $id = 'DEP-006'; $cat = 'Deployment'; $title = 'Hyper-V workgroup cluster'
+
+    # KB4800 (2026-09-10): Linux-based backup servers do not support Hyper-V workgroup
+    # clusters; the configuration is Windows-only.
+    #
+    # ⚠️ "Workgroup" means the cluster is NOT domain-joined, and that is not something
+    # this check can read. Do NOT infer it from the name: SEC-004 learned that lesson
+    # the hard way - a dotted name and a NetBIOS-style label are indistinguishable as
+    # shapes, and guessing either way is harmful at fleet scale. So presence of a
+    # Hyper-V cluster is reported, and domain membership is left to the operator.
+    #
+    # Most Hyper-V clusters ARE domain-joined and therefore unaffected, so the finding
+    # says so plainly rather than implying every cluster is a problem.
+    $inv = Get-PrecheckManagedServer
+    if (-not $inv.Ok) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'The managed-server inventory could not be read, so whether a Hyper-V cluster is connected to this deployment is unknown.' `
+            -Recommendation 'Confirm by hand whether any Hyper-V cluster in this deployment is a workgroup (non-domain-joined) cluster. Those are not supported on a Linux-based backup server.'
+    }
+    $servers = @($inv.Server)
+
+    $clusters = Get-PrecheckServerOfType -Server $servers -Type 'HvCluster'
+    if ($clusters.Count -gt 0) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$($clusters.Count) Hyper-V cluster(s) are connected to this deployment. Linux-based backup servers do not support Hyper-V WORKGROUP clusters. Whether a cluster is domain-joined is NOT readable from Veeam PowerShell, so this is flagged for confirmation - a domain-joined Hyper-V cluster is unaffected and needs no action." `
+            -Recommendation 'Confirm whether any cluster below is a workgroup (non-domain-joined) cluster. If one is, it cannot be managed from the Veeam Software Appliance and must be domain-joined or excluded before migrating. Domain-joined clusters require no action.' `
+            -Evidence ($clusters | ForEach-Object { "Hyper-V cluster: $($_.Name)" })
+    }
+
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
+        -Detail "$($servers.Count) managed server(s) were enumerated and none is a Hyper-V cluster, so the workgroup-cluster limitation does not apply to this deployment."
 }

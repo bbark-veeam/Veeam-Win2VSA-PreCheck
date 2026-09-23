@@ -37,13 +37,13 @@
   <h1>Windows VBR &#8594; Veeam Software Appliance &mdash; Migration Precheck</h1>
   <div class="meta">Server: BACKUP01.corp.local &nbsp;|&nbsp;
     Build: Veeam Backup &amp; Replication 13.0.2.29 &nbsp;|&nbsp;
-    Generated: 2026-08-11 17:07:57 -04:00 &nbsp;|&nbsp;
-    Precheck version: 1.0.0 &nbsp;|&nbsp;
-    Reference: KB4800 (captured 2026-08-04)</div>
+    Generated: 2026-09-23 12:51:20 -04:00 &nbsp;|&nbsp;
+    Precheck version: 1.1.0 &nbsp;|&nbsp;
+    Reference: KB4800 (captured 2026-09-10)</div>
 </header>
 <div class="wrap">
   <div class="verdict">REVIEW WARNINGS</div>
-  <div class="counts">26 checks &nbsp;&bull;&nbsp; Blocker 0 &nbsp;&bull;&nbsp; Action 0 &nbsp;&bull;&nbsp; Warning 0 &nbsp;&bull;&nbsp; Manual 2 &nbsp;&bull;&nbsp; NextStep 1 &nbsp;&bull;&nbsp; Info 0 &nbsp;&bull;&nbsp; Pass 20 &nbsp;&bull;&nbsp; Skipped 3</div>
+  <div class="counts">29 checks &nbsp;&bull;&nbsp; Blocker 0 &nbsp;&bull;&nbsp; Action 0 &nbsp;&bull;&nbsp; Warning 0 &nbsp;&bull;&nbsp; Manual 1 &nbsp;&bull;&nbsp; NextStep 1 &nbsp;&bull;&nbsp; Info 0 &nbsp;&bull;&nbsp; Pass 24 &nbsp;&bull;&nbsp; Skipped 3</div>
   <div class="card">
     <table>
       <thead><tr><th>Status</th><th>ID</th><th>Check</th><th>Category</th></tr></thead>
@@ -55,17 +55,6 @@
     <div class="title">Four-eyes authorization</div>
     <div class="detail">Four-eyes authorization state is not exposed to PowerShell.</div>
     <div class='rec'>&#8594; Check it in the console under Users &amp; Roles &gt; Authorization tab. If it is enabled, plan to re-enable it on the Veeam Software Appliance after migration. This step cannot be automated and will need doing on every server.</div>
-    
-  </td>
-  <td class="cat">Security</td>
-</tr>
-<tr>
-  <td><span class="pill" style="background:#2980b9">Manual</span></td>
-  <td class="mono">SEC-003</td>
-  <td>
-    <div class="title">Trusted-domain authentication</div>
-    <div class="detail">The Veeam Software Appliance does not support trusted-domain authentication.</div>
-    <div class='rec'>&#8594; Confirm no credentials/servers authenticate across a domain trust (accounts from a trusted, non-primary domain). Such access must be reworked before migration.</div>
     
   </td>
   <td class="cat">Security</td>
@@ -130,9 +119,9 @@
   <td class="mono">DB-001</td>
   <td>
     <div class="title">Session-history retention</div>
-    <div class="detail">Session history is kept for 13 week(s), which is shorter than the 104 week(s) since the upgrade on 2024-08-11 - so any sessions predating the upgrade have already aged out of the database.</div>
+    <div class="detail">Session history is kept for 13 week(s), which is shorter than the 104 week(s) since the upgrade on 2024-09-23 - so any sessions predating the upgrade have already aged out of the database.</div>
     
-    <ul class='ev'><li>KeepAllSessions=False</li><li>RetentionLimitWeeks=13</li><li>Upgrade cutoff=2024-08-11</li><li>Weeks since cutoff=104</li></ul>
+    <ul class='ev'><li>KeepAllSessions=False</li><li>RetentionLimitWeeks=13</li><li>Upgrade cutoff=2024-09-23</li><li>Weeks since cutoff=104</li></ul>
   </td>
   <td class="cat">Job history</td>
 </tr>
@@ -171,11 +160,44 @@
 </tr>
 <tr>
   <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">DEP-004</td>
+  <td>
+    <div class="title">Hyper-V SCVMM</div>
+    <div class="detail">3 managed server(s) were enumerated and none is an SCVMM server. No Hyper-V host or cluster is connected to this deployment at all. The limitation applies only where SCVMM is added to Veeam, so it does not apply here.</div>
+    
+    
+  </td>
+  <td class="cat">Deployment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">DEP-005</td>
+  <td>
+    <div class="title">Veeam Plug-in for oVirt</div>
+    <div class="detail">No plug-in platform configuration found. The job list and the managed-server inventory were both read: no job carries the plug-in platform job type, and no external-infrastructure host is registered. The Veeam Plug-in for oVirt is therefore not configured here.</div>
+    
+    
+  </td>
+  <td class="cat">Deployment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">DEP-006</td>
+  <td>
+    <div class="title">Hyper-V workgroup cluster</div>
+    <div class="detail">3 managed server(s) were enumerated and none is a Hyper-V cluster, so the workgroup-cluster limitation does not apply to this deployment.</div>
+    
+    
+  </td>
+  <td class="cat">Deployment</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
   <td class="mono">ENV-001</td>
   <td>
     <div class="title">Source VBR version</div>
-    <div class="detail">Detected build 13.0.2.29 (&#39;Veeam Backup &amp; Replication 13.0.2.29&#39;). This is within the supported 13.0.x train. The target Veeam Software Appliance must be running this same version, 13.0.2.29.</div>
-    <div class='rec'>&#8594; Deploy or update the target Veeam Software Appliance to 13.0.2.29 - the source and target versions must match. Confirm first that 13.0.2.29 is the latest available 13.0.x patch; if it is not, patch this server and match the appliance to whatever it then reports.</div>
+    <div class="detail">Detected build 13.0.2.29 (&#39;Veeam Backup &amp; Replication 13.0.2.29&#39;). This is within the supported 13.0.x train. The target Veeam Software Appliance must be running this same version, 13.0.2.29 - and KB4800 requires that to be the LATEST available 13.0.x patch, so confirm this server is current before matching the appliance to it.</div>
+    <div class='rec'>&#8594; Confirm first that 13.0.2.29 is the latest available 13.0.x patch - KB4800 names a specific build and advances it with each patch release, so read the KB rather than assuming this one is current. If it is current, deploy or update the target Veeam Software Appliance to 13.0.2.29 - the source and target versions must match. If it is behind, patch this server first and match the appliance to whatever it reports afterwards.</div>
     
   </td>
   <td class="cat">Environment</td>
@@ -265,6 +287,17 @@
     <div class="detail">3 Datacenter Credential(s) were examined and none uses a NetBIOS domain prefix, a machine prefix, or a bare user name, so nothing needs review for Kerberos-authenticated connections. 2 are already in user@fqdn or fqdn\user form. 1 were set aside as not applying to Kerberos paths (SSH, key, token or managed-service credentials, and &#39;root&#39; accounts).</div>
     
     
+  </td>
+  <td class="cat">Security</td>
+</tr>
+<tr>
+  <td><span class="pill" style="background:#27ae60">Pass</span></td>
+  <td class="mono">SEC-003</td>
+  <td>
+    <div class="title">Trusted-domain authentication</div>
+    <div class="detail">This domain participates in no trust relationships at either domain or forest level, so no account in Users and Roles or the Credentials Manager can be authenticating across a trust. The limitation cannot apply to this server.</div>
+    
+    <ul class='ev'><li>Domain-level trusts: 0</li><li>Forest-level trusts: 0</li></ul>
   </td>
   <td class="cat">Security</td>
 </tr>

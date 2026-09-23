@@ -48,9 +48,9 @@ $root = Split-Path -Parent $PSCommandPath
 # =============================================================================
 #  GENERATED FILE - do not edit.
 #  Built from the VbrMigrationPrecheck module by Build-SingleFile.ps1.
-#  Version : 1.0.0
-#  Built   : 2026-08-11 17:07:22
-#  Sources : 16 files
+#  Version : 1.1.0
+#  Built   : 2026-09-23 12:03:41
+#  Sources : 17 files
 #
 #  Edit the module under VbrMigrationPrecheck/ and rebuild - changes made here
 #  are lost on the next build.
@@ -61,7 +61,48 @@ $root = Split-Path -Parent $PSCommandPath
 $script:PrecheckRoot = $PSScriptRoot
 
 # Stamped in at build time so reports state which build produced them.
-$script:PrecheckVersion = '1.0.0'
+$script:PrecheckVersion = '1.1.0'
+
+# -----------------------------------------------------------------------------
+# VbrMigrationPrecheck/Private/Get-PrecheckManagedServer.ps1
+# -----------------------------------------------------------------------------
+# Shared reader for the managed-server inventory (Get-VBRServer).
+#
+# Lives in Private/ rather than beside one check because THREE checks in two files
+# need it - DEP-004 and DEP-006 in Test-Deployment.ps1, and PRE-002 in
+# Test-PreMigration.ps1. Going through Get-PrecheckCached means the server list is
+# fetched once per run rather than per caller, which is the same arrangement every
+# other shared cmdlet in the tool already uses (jobs, protection groups, policies,
+# licence, Entra ID tenants, storage plug-in hosts).
+#
+# Returns an OBJECT carrying an explicit Ok flag, not a bare collection. Returning
+# $null-for-unreadable and @()-for-empty looks equivalent and is not: PowerShell
+# unrolls an empty array on return, so `return @()` arrives at the caller as $null
+# and "could not be read" becomes indistinguishable from "read, found none". A
+# pscustomobject is a single object and never unrolls, so the two stay distinct -
+# which is the whole point, an unread collection reported as "none found" being the
+# false-clean-result defect this tool has hit fifteen times.
+function Get-PrecheckManagedServer {
+    [CmdletBinding()] param()
+    if (-not (Test-PrecheckCmdlet 'Get-VBRServer')) {
+        return [pscustomobject]@{ Ok = $false; Server = @() }
+    }
+    try {
+        $s = @(Get-PrecheckCached -Key 'Servers' -Getter { Get-VBRServer -ErrorAction Stop })
+        return [pscustomobject]@{ Ok = $true; Server = $s }
+    }
+    catch { return [pscustomobject]@{ Ok = $false; Server = @() } }
+}
+
+# Exact enum comparison against VBRHostType, never a substring match. 'Scvmm' and
+# 'HvCluster' are both VBRHostType values; matching loosely is the defect class that
+# produced AGT-004 (ManuallyDeployed vs ManuallyAdded) and was tightened in PRE-003.
+function Get-PrecheckServerOfType {
+    [CmdletBinding()] param([object[]] $Server, [string] $Type)
+    @($Server | Where-Object {
+        $_.PSObject.Properties['Type'] -and "$($_.Type)" -eq $Type
+    })
+}
 
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Private/Get-VbrProductVersion.ps1
@@ -176,7 +217,7 @@ function Get-VbrProductVersion {
 # a report stays honestly bounded: the KB is a living document and its guidance can
 # change with a new release, long after a given report was produced.
 # UPDATE THIS whenever KB4800 is re-read and the checks are reconciled against it.
-$script:PrecheckKbCaptured = '2026-08-04'
+$script:PrecheckKbCaptured = '2026-09-10'
 
 $script:PrecheckStatusRank = @{
     Blocker  = 6
@@ -822,7 +863,9 @@ function Test-SessionHistoryAge {
 # -----------------------------------------------------------------------------
 # Deployment-shape checks: configurations that block or partially block a whole
 # deployment from migrating.
-# KB4800: "Cloud Connectivity", "Google Cloud Integration", "Entra ID Tenant Backups".
+# KB4800: "Cloud Connectivity", "Google Cloud Integration", "Entra ID Tenant Backups",
+# "Hyper-V SCVMM High Availability", "Veeam Plug-in for oVirt", "Hyper-V workgroup
+# clusters" (the last three added to KB4800 on 2026-09-10).
 
 function Test-CloudConnect {
     [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
@@ -992,6 +1035,177 @@ function Test-EntraIdBackups {
         -Detail 'The Entra ID tenant inventory on this server was read successfully and is empty, so no Entra ID backup data is affected by the migration.'
 }
 
+function Test-ScvmmHighAvailability {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
+
+    $id = 'DEP-004'; $cat = 'Deployment'; $title = 'Hyper-V SCVMM'
+
+    # KB4800 (2026-09-10): the Veeam Software Appliance does not support the Hyper-V
+    # SCVMM High Availability feature.
+    #
+    # ⚠️ Whether the HA FEATURE is in use is not exposed anywhere on the PowerShell
+    # surface - there is no Get-VBRHvScvmm at all (only Add-/Set-), so SCVMM is
+    # reachable only as a host type on Get-VBRServer. This check therefore reports
+    # SCVMM PRESENCE and asks the operator to confirm the feature, rather than
+    # claiming a configuration it cannot read. Presence is provable; use is not.
+    #
+    # It fires on every SCVMM-managed Hyper-V estate by construction. That is
+    # intended: Manual never changes the exit code, and staying silent on a server
+    # that may carry an unsupported feature is the worse failure.
+    $inv = Get-PrecheckManagedServer
+    if (-not $inv.Ok) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'The managed-server inventory could not be read, so whether an SCVMM server is connected to this deployment is unknown.' `
+            -Recommendation 'Confirm by hand whether System Center Virtual Machine Manager is added to this deployment. The Veeam Software Appliance does not support the Hyper-V SCVMM High Availability feature.'
+    }
+    $servers = @($inv.Server)
+
+    $scvmm = Get-PrecheckServerOfType -Server $servers -Type 'Scvmm'
+    if ($scvmm.Count -gt 0) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$($scvmm.Count) System Center Virtual Machine Manager server(s) are connected to this deployment. The Veeam Software Appliance does not support the Hyper-V SCVMM High Availability feature. Whether that feature is actually in use is NOT readable from Veeam PowerShell, so this is flagged for confirmation rather than reported as a finding." `
+            -Recommendation 'Confirm in SCVMM whether the High Availability feature is in use. If it is, that configuration is not supported on the Veeam Software Appliance and must be resolved with Veeam Support before migrating.' `
+            -Evidence ($scvmm | ForEach-Object { "SCVMM server: $($_.Name)" })
+    }
+
+    # The limitation is scoped to SCVMM being added to Veeam, so both of these are a
+    # clean pass and the detail says which one applies: a deployment with no Hyper-V at
+    # all, and a Hyper-V deployment managed without SCVMM.
+    $hyperV = @(Get-PrecheckServerOfType -Server $servers -Type 'HvServer') +
+              @(Get-PrecheckServerOfType -Server $servers -Type 'HvCluster')
+    $scope = if ($hyperV.Count -eq 0) {
+        'No Hyper-V host or cluster is connected to this deployment at all.'
+    } else {
+        "$($hyperV.Count) Hyper-V host(s)/cluster(s) are connected, but none is managed through SCVMM."
+    }
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
+        -Detail "$($servers.Count) managed server(s) were enumerated and none is an SCVMM server. $scope The limitation applies only where SCVMM is added to Veeam, so it does not apply here."
+}
+
+function Test-OVirtPlugin {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
+
+    $id = 'DEP-005'; $cat = 'Deployment'; $title = 'Veeam Plug-in for oVirt'
+
+    # KB4800 (2026-09-10): oVirt plug-in configuration cannot be migrated, because the
+    # plug-in is not available for VSA 13.0.x - the only version that supports
+    # migration. (13.1 has the plug-in but not migration, so there is no version where
+    # both work; affected customers are told to stay on Windows for now.)
+    #
+    # ⚠️⚠️ THIS CHECK ORIGINALLY READ Get-VBRPluginJob AND WOULD NEVER HAVE FIRED.
+    # Measured 2026-09-23 on a 13.1.1.18 appliance carrying three hypervisor plug-in
+    # jobs (Nutanix AHV, Proxmox VE, HPE Morpheus): Get-VBRPluginJob returned ZERO.
+    # That cmdlet covers the standalone ENTERPRISE DATABASE plug-ins - Oracle RMAN, SAP
+    # HANA, MSSQL - not hypervisor integrations. A plausible cmdlet name returning
+    # nothing while reporting a confident clean result is this tool's signature defect,
+    # and it was caught only because the shape was measured before release.
+    #
+    # WHAT ACTUALLY IDENTIFIES A HYPERVISOR PLUG-IN JOB, measured on that server:
+    #   Get-VBRJob  ->  JobType      = VmbApiPolicyTempJob   (all three plug-ins)
+    #                   BackupPlatform = ECustomPlatform     (all three, a CPlatform
+    #                                    CLASS - not an enum - so it cannot name which)
+    #                   TypeToString = "Proxmox Backup"      <- the platform, a STRING
+    #
+    # So TypeToString is the discriminator. Two consequences:
+    #   1. It is a free-form string, NOT an enum, so oVirt's exact value cannot be
+    #      reflected. Six enums were dumped in full and none carries an oVirt member.
+    #      Do NOT guess the value from the Proxmox one - that is the AGT-003
+    #      'Mac'-matches-"machine" mistake. A real oVirt sighting is still required
+    #      before this can become the Blocker its KB severity justifies.
+    #   2. ⚠️ The CONSOLE'S Type column is NOT TypeToString. The console shows
+    #      "Proxmox VE Backup"; the property says "Proxmox Backup". Never build a
+    #      check from a screenshot.
+    $jobsOk = $false
+    $platformJobs = @()
+    if (Test-PrecheckCmdlet 'Get-VBRJob') {
+        try {
+            $allJobs = @(Get-PrecheckCached -Key 'Jobs' -Getter { Get-VBRJob -ErrorAction Stop })
+            # Exact enum comparison, never a substring - the PRE-003 rule.
+            $platformJobs = @($allJobs | Where-Object {
+                $_.PSObject.Properties['JobType'] -and "$($_.JobType)" -eq 'VmbApiPolicyTempJob'
+            })
+            $jobsOk = $true
+        }
+        catch { }
+    }
+
+    # Second signal, and it closes the old blind spot: plug-in infrastructure
+    # registered with NO job. Measured - a Nutanix cluster registers as
+    # ExternalInfrastructureServer. That type is shared with Azure and others, so it
+    # cannot name oVirt either; it is reported as a candidate, not a finding.
+    $inv = Get-PrecheckManagedServer
+    $extHosts = if ($inv.Ok) { @(Get-PrecheckServerOfType -Server $inv.Server -Type 'ExternalInfrastructureServer') } else { @() }
+
+    if (-not $jobsOk -or -not $inv.Ok) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'Whether a plug-in platform is configured on this server could not be determined - the job list or the managed-server inventory could not be read.' `
+            -Recommendation 'Confirm by hand whether the Veeam Plug-in for oVirt is in use. Its configuration cannot be migrated, because the plug-in is not available for the Veeam Software Appliance 13.0.x releases that support migration.' `
+            -Evidence @("Job list: $(if ($jobsOk) { 'read' } else { 'could not be read' })",
+                        "Managed-server inventory: $(if ($inv.Ok) { 'read' } else { 'could not be read' })")
+    }
+
+    $ev = @()
+    foreach ($j in $platformJobs) {
+        $plat = if ($j.PSObject.Properties['TypeToString'] -and $j.TypeToString) { "$($j.TypeToString)" } else { 'platform not readable' }
+        $ev += "Plug-in job: $($j.Name) [$plat]"
+    }
+    foreach ($h in $extHosts) { $ev += "External infrastructure host: $($h.Name)" }
+
+    if ($ev.Count -gt 0) {
+        # Any oVirt-shaped wording upgrades the language, but the status stays Manual:
+        # the vocabulary is unconfirmed in both directions.
+        $looksOVirt = @($ev | Where-Object { $_ -match 'oVirt|RHV|Red\s*Hat' })
+        $lead = if ($looksOVirt.Count -gt 0) {
+            'Configuration that appears to belong to the Veeam Plug-in for oVirt was found on this server.'
+        } else {
+            "$($platformJobs.Count) plug-in platform job(s) and $($extHosts.Count) external-infrastructure host(s) are configured on this server. None names oVirt, but the exact wording oVirt uses has not been confirmed against a live oVirt deployment, so this is listed for a human to confirm rather than cleared."
+        }
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$lead Any configuration associated with the Veeam Plug-in for oVirt will NOT migrate, because the plug-in is not available for the Veeam Software Appliance 13.0.x releases that support migration." `
+            -Recommendation 'Confirm whether any item below belongs to the Veeam Plug-in for oVirt. If so, it cannot be migrated: either remove all oVirt configuration before migrating and rebuild it after upgrading the appliance, or stay on the Windows deployment until a release supports both the plug-in and migration. Items belonging to other plug-in platforms (Proxmox, Nutanix, HPE Morpheus) are unaffected by this limitation.' `
+            -Evidence ($ev | Sort-Object -Unique)
+    }
+
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
+        -Detail "No plug-in platform configuration found. The job list and the managed-server inventory were both read: no job carries the plug-in platform job type, and no external-infrastructure host is registered. The Veeam Plug-in for oVirt is therefore not configured here."
+}
+
+function Test-HyperVWorkgroupCluster {
+    [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
+
+    $id = 'DEP-006'; $cat = 'Deployment'; $title = 'Hyper-V workgroup cluster'
+
+    # KB4800 (2026-09-10): Linux-based backup servers do not support Hyper-V workgroup
+    # clusters; the configuration is Windows-only.
+    #
+    # ⚠️ "Workgroup" means the cluster is NOT domain-joined, and that is not something
+    # this check can read. Do NOT infer it from the name: SEC-004 learned that lesson
+    # the hard way - a dotted name and a NetBIOS-style label are indistinguishable as
+    # shapes, and guessing either way is harmful at fleet scale. So presence of a
+    # Hyper-V cluster is reported, and domain membership is left to the operator.
+    #
+    # Most Hyper-V clusters ARE domain-joined and therefore unaffected, so the finding
+    # says so plainly rather than implying every cluster is a problem.
+    $inv = Get-PrecheckManagedServer
+    if (-not $inv.Ok) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'The managed-server inventory could not be read, so whether a Hyper-V cluster is connected to this deployment is unknown.' `
+            -Recommendation 'Confirm by hand whether any Hyper-V cluster in this deployment is a workgroup (non-domain-joined) cluster. Those are not supported on a Linux-based backup server.'
+    }
+    $servers = @($inv.Server)
+
+    $clusters = Get-PrecheckServerOfType -Server $servers -Type 'HvCluster'
+    if ($clusters.Count -gt 0) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$($clusters.Count) Hyper-V cluster(s) are connected to this deployment. Linux-based backup servers do not support Hyper-V WORKGROUP clusters. Whether a cluster is domain-joined is NOT readable from Veeam PowerShell, so this is flagged for confirmation - a domain-joined Hyper-V cluster is unaffected and needs no action." `
+            -Recommendation 'Confirm whether any cluster below is a workgroup (non-domain-joined) cluster. If one is, it cannot be managed from the Veeam Software Appliance and must be domain-joined or excluded before migrating. Domain-joined clusters require no action.' `
+            -Evidence ($clusters | ForEach-Object { "Hyper-V cluster: $($_.Name)" })
+    }
+
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
+        -Detail "$($servers.Count) managed server(s) were enumerated and none is a Hyper-V cluster, so the workgroup-cluster limitation does not apply to this deployment."
+}
+
 # -----------------------------------------------------------------------------
 # VbrMigrationPrecheck/Checks/Test-Environment.ps1
 # -----------------------------------------------------------------------------
@@ -1019,8 +1233,8 @@ function Test-VbrVersion {
     }
     if ($build.Major -eq 13 -and $build.Minor -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail "$detail This is within the supported 13.0.x train. The target Veeam Software Appliance must be running this same version, $build." `
-            -Recommendation "Deploy or update the target Veeam Software Appliance to $build - the source and target versions must match. Confirm first that $build is the latest available 13.0.x patch; if it is not, patch this server and match the appliance to whatever it then reports."
+            -Detail "$detail This is within the supported 13.0.x train. The target Veeam Software Appliance must be running this same version, $build - and KB4800 requires that to be the LATEST available 13.0.x patch, so confirm this server is current before matching the appliance to it." `
+            -Recommendation "Confirm first that $build is the latest available 13.0.x patch - KB4800 names a specific build and advances it with each patch release, so read the KB rather than assuming this one is current. If it is current, deploy or update the target Veeam Software Appliance to $build - the source and target versions must match. If it is behind, patch this server first and match the appliance to whatever it reports afterwards."
     }
     # Never name or make claims about an unreleased build: this output goes to
     # customers and in-development behaviour can still change. Point at the released
@@ -1441,10 +1655,12 @@ function Test-PreMachineAccessibility {
     # we enumerate the managed infrastructure to make it concrete.
     $id = 'PRE-002'; $cat = 'Preparation'; $title = 'Machine reachability from the appliance'
 
-    $servers = @()
-    if (Test-PrecheckCmdlet 'Get-VBRServer') {
-        try { $servers = @(Get-VBRServer -ErrorAction SilentlyContinue) } catch { }
-    }
+    # Shares the cached inventory with DEP-004/DEP-006 rather than fetching its own
+    # copy: the server list was the last shared cmdlet in the tool still being read
+    # twice per run. Also gains the Ok flag, so an unreadable inventory can say so
+    # instead of silently presenting itself as an empty one.
+    $inv = Get-PrecheckManagedServer
+    $servers = @($inv.Server)
     $ev = @()
     if ($servers.Count -gt 0) {
         $ev = $servers | ForEach-Object {
@@ -1452,10 +1668,14 @@ function Test-PreMachineAccessibility {
             "Managed server: $($_.Name)$t"
         }
     }
-    $detail = if ($servers.Count -gt 0) {
+    # An unreadable inventory and an empty one used to produce the same sentence, which
+    # read as "there is nothing to check" in both cases. They are now distinct.
+    $detail = if (-not $inv.Ok) {
+        'The managed-server inventory could not be read, so this next step cannot list the machines it applies to. Confirm every machine managed by this deployment will be reachable from the VSA.'
+    } elseif ($servers.Count -gt 0) {
         "$($servers.Count) managed server(s)/host(s) are registered. Each must be reachable from the VSA after migration."
     } else {
-        'Confirm every machine managed by this deployment will be reachable from the VSA.'
+        'The managed-server inventory was read successfully and is empty. Confirm every machine managed by this deployment will be reachable from the VSA.'
     }
     return New-PrecheckResult -Id $id -Category $cat -Title $title -Status NextStep `
         -Detail $detail `
@@ -1747,15 +1967,128 @@ function Test-RoleAssignmentUpnFormat {
         -Evidence ($bad | Sort-Object -Unique)
 }
 
+# The ONLY place the raw Active Directory calls live. Isolated so SEC-003 can be
+# tested without a domain, and so the measured findings below sit next to the code
+# they constrain.
+#
+# Measured 2026-09-14 on a domain-joined Windows VBR 13.0.3:
+#
+#   * Works with NO RSAT. The ActiveDirectory module was absent and every call
+#     still succeeded - System.DirectoryServices.ActiveDirectory ships with the
+#     framework. That was the load-bearing question; a check needing RSAT would not
+#     be viable on a typical VBR server.
+#   * Fast enough for a fleet: domain 33 ms, forest 3 ms, trust enumeration 19 ms
+#     and 5 ms. No timeout needed.
+#   * ⚠️ A trust-free domain returns NOTHING DISTINGUISHABLE FROM A FAILED CALL at
+#     the call site - an empty collection unrolls, so it arrives as $null exactly
+#     as a failure would. **The call not throwing is therefore the only sound
+#     discriminator.** Never infer "no trusts" from a null or empty return.
+#   * ⚠️ The [...ActiveDirectory.Domain] TYPE RESOLVES even where AD is completely
+#     unusable (confirmed on macOS, where only the call fails, wrapped in a generic
+#     MethodInvocationException). A type-availability guard proves nothing; the call
+#     has to be made and caught.
+#
+# Returns a single object with explicit Ok flags rather than bare collections, for
+# the same reason DEP-004/006 do: an empty collection and an unreadable one are the
+# same value once returned, and conflating them is how a clean result gets faked.
+function Get-PrecheckDomainTrustInfo {
+    [CmdletBinding()] param()
+
+    $partOfDomain = $null
+    try {
+        $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        if ($cs -and $cs.PSObject.Properties['PartOfDomain']) { $partOfDomain = [bool]$cs.PartOfDomain }
+    } catch { }
+
+    $domainOk = $false; $domainTrusts = @()
+    try {
+        $domainTrusts = @([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().GetAllTrustRelationships())
+        $domainOk = $true
+    } catch { }
+
+    # Read both levels. The domain object reports trusts this domain participates in
+    # (including automatic parent/child trusts inside a multi-domain forest); the
+    # forest object reports forest-level external/forest trusts. Either is a route
+    # for a principal from another domain to authenticate, so both must be empty.
+    $forestOk = $false; $forestTrusts = @()
+    try {
+        $forestTrusts = @([System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest().GetAllTrustRelationships())
+        $forestOk = $true
+    } catch { }
+
+    [pscustomobject]@{
+        PartOfDomain = $partOfDomain
+        DomainOk     = $domainOk
+        DomainTrusts = $domainTrusts
+        ForestOk     = $forestOk
+        ForestTrusts = $forestTrusts
+    }
+}
+
 function Test-TrustedDomainAuth {
     [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
 
     $id = 'SEC-003'; $cat = 'Security'; $title = 'Trusted-domain authentication'
+    $advice = 'Confirm no credentials or servers authenticate across a domain trust (accounts from a trusted, non-primary domain). Such access must be reworked before migration.'
 
-    # Not derivable from cmdlets - guided manual check.
-    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-        -Detail 'The Veeam Software Appliance does not support trusted-domain authentication.' `
-        -Recommendation 'Confirm no credentials/servers authenticate across a domain trust (accounts from a trusted, non-primary domain). Such access must be reworked before migration.'
+    # KB4800 scopes this to TWO surfaces: "user accounts specified in Users and Roles
+    # and the Credentials Manager".
+    #
+    # ⚠️ Neither surface is examined, and that is deliberate. Reading the principals
+    # cannot settle it: a domain-local or universal group in this domain may contain
+    # foreign security principals from across a trust, and group membership is not
+    # readable from here - so "every assignment names a principal in one domain"
+    # proves nothing. (Excluding BUILTIN\Administrators makes that worse, not better:
+    # on a domain-joined server it is the entry most likely to span a trust.)
+    #
+    # Instead prove the PRECONDITION is absent. If the domain participates in no trust
+    # at all, then no principal on EITHER surface can be authenticating across one, so
+    # the limitation cannot apply. Same move as DB-001's PostgreSQL scoping, and it
+    # covers both surfaces at once rather than half of them.
+    $info = Get-PrecheckDomainTrustInfo
+
+    # Not domain-joined is NOT a clean pass: a workgroup backup server has no domain
+    # of its own to read trusts from, but its Credentials Manager can still hold
+    # domain accounts.
+    if ($info.PartOfDomain -eq $false) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'This server is not domain-joined, so it has no domain trusts to read. That does not clear the limitation: the Credentials Manager can still hold accounts from a domain, and the Veeam Software Appliance does not support trusted-domain authentication.' `
+            -Recommendation $advice
+    }
+
+    if (-not $info.DomainOk -or -not $info.ForestOk) {
+        $which = if (-not $info.DomainOk -and -not $info.ForestOk) { 'Neither the domain nor the forest trust list' }
+                 elseif (-not $info.DomainOk)                      { 'The domain trust list' }
+                 else                                             { 'The forest trust list' }
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$which could not be read from Active Directory, so whether this domain has any trust relationships is unknown. The Veeam Software Appliance does not support trusted-domain authentication." `
+            -Recommendation $advice `
+            -Evidence @("Domain trust enumeration: $(if ($info.DomainOk) { 'read' } else { 'could not be read' })",
+                        "Forest trust enumeration: $(if ($info.ForestOk) { 'read' } else { 'could not be read' })")
+    }
+
+    # Both levels read. A trust reported at both levels appears twice, so de-duplicate.
+    # Trust properties are documented .NET members but have NOT been seen on a real
+    # trust (the validating lab had none), so read each defensively - a missing member
+    # must not break the finding.
+    $trusts = @($info.DomainTrusts) + @($info.ForestTrusts)
+    if ($trusts.Count -gt 0) {
+        $ev = @($trusts | ForEach-Object {
+            $target = if ($_.PSObject.Properties['TargetName'])     { "$($_.TargetName)" }     else { '<name unreadable>' }
+            $type   = if ($_.PSObject.Properties['TrustType'])      { "$($_.TrustType)" }      else { 'type unreadable' }
+            $dir    = if ($_.PSObject.Properties['TrustDirection']) { "$($_.TrustDirection)" } else { 'direction unreadable' }
+            "Trust: $target [$type, $dir]"
+        } | Sort-Object -Unique)
+
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "This domain participates in $($ev.Count) trust relationship(s), so trusted-domain authentication is possible here and the Veeam Software Appliance does not support it. Which accounts actually authenticate across a trust cannot be determined from this server - a group in this domain can contain members from a trusted one, and group membership is not readable." `
+            -Recommendation $advice `
+            -Evidence $ev
+    }
+
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
+        -Detail 'This domain participates in no trust relationships at either domain or forest level, so no account in Users and Roles or the Credentials Manager can be authenticating across a trust. The limitation cannot apply to this server.' `
+        -Evidence @('Domain-level trusts: 0', 'Forest-level trusts: 0')
 }
 
 function Test-RepositoryLocalAccounts {
@@ -2548,6 +2881,9 @@ function Invoke-VbrMigrationPrecheck {
         'Test-CloudConnect'
         'Test-GoogleCloudPlugin'
         'Test-EntraIdBackups'
+        'Test-ScvmmHighAvailability'
+        'Test-OVirtPlugin'
+        'Test-HyperVWorkgroupCluster'
         'Test-AgentVersions'
         'Test-AgentDisabledPolicies'
         'Test-MacAgentDomainAuth'

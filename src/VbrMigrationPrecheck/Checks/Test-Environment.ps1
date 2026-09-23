@@ -22,8 +22,8 @@ function Test-VbrVersion {
     }
     if ($build.Major -eq 13 -and $build.Minor -eq 0) {
         return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
-            -Detail "$detail This is within the supported 13.0.x train. The target Veeam Software Appliance must be running this same version, $build." `
-            -Recommendation "Deploy or update the target Veeam Software Appliance to $build - the source and target versions must match. Confirm first that $build is the latest available 13.0.x patch; if it is not, patch this server and match the appliance to whatever it then reports."
+            -Detail "$detail This is within the supported 13.0.x train. The target Veeam Software Appliance must be running this same version, $build - and KB4800 requires that to be the LATEST available 13.0.x patch, so confirm this server is current before matching the appliance to it." `
+            -Recommendation "Confirm first that $build is the latest available 13.0.x patch - KB4800 names a specific build and advances it with each patch release, so read the KB rather than assuming this one is current. If it is current, deploy or update the target Veeam Software Appliance to $build - the source and target versions must match. If it is behind, patch this server first and match the appliance to whatever it reports afterwards."
     }
     # Never name or make claims about an unreleased build: this output goes to
     # customers and in-development behaviour can still change. Point at the released

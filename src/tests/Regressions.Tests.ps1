@@ -15,6 +15,13 @@ BeforeAll {
     $script:Mod = Get-Module VbrMigrationPrecheck
     $script:Ctx = [pscustomobject]@{ Server = 'localhost' }
 
+    # SEC-003 reads Active Directory through static .NET calls, which cannot be
+    # shadowed by a global function the way a cmdlet can. They are isolated in one
+    # module-private function, and that function is replaced here inside the module's
+    # own scope - so the check is exercised in full without a domain, and no test hook
+    # exists in the shipping code.
+    & $script:Mod { function script:Get-PrecheckDomainTrustInfo { $global:MockTrustInfo } }
+
     $global:MockAgents      = @()
     $global:MockPolicies    = @()
     $global:MockGroups      = @()
@@ -69,7 +76,13 @@ BeforeAll {
     function global:Get-VBRInstalledLicense       { param($ErrorAction) Assert-MockOk 'Get-VBRInstalledLicense'; $global:MockLicense }
     function global:Get-VBRHistoryOptions        { param($ErrorAction) Assert-MockOk 'Get-VBRHistoryOptions'; $global:MockHistory }
     function global:Get-VBRSecurityOptions       { param($ErrorAction) Assert-MockOk 'Get-VBRSecurityOptions'; $global:MockSecurityOptions }
-    function global:Get-VBRServer                { param($ErrorAction, $Type) Assert-MockOk 'Get-VBRServer'; $global:MockServers }
+    # Counts its calls: DEP-004, DEP-006 and PRE-002 all read the server list, and it is
+    # cached so the cache would be invisible otherwise - the results are identical either
+    # way, which is exactly why a dropped cache needs a test rather than a review.
+    # Counts ATTEMPTS, so the increment precedes Assert-MockOk - a failed read must still
+    # register, because the point is to prove a throwing getter is retried rather than
+    # cached. (MockPolicyReads above counts successful reads only; different question.)
+    function global:Get-VBRServer                { param($ErrorAction, $Type) $global:MockServerReads++; Assert-MockOk 'Get-VBRServer'; $global:MockServers }
     function global:Get-VBRTapeJob               { param($ErrorAction) Assert-MockOk 'Get-VBRTapeJob'; $global:MockTapeJobs }
     # DB-001 reads the retention SETTING, never the sessions. This stub fails loudly if
     # anything reaches for the sessions again: the cmdlet has no date filter and no
@@ -86,6 +99,7 @@ BeforeAll {
     function global:Get-VBRJob                     { param($ErrorAction) Assert-MockOk 'Get-VBRJob'; $global:MockJobs }
     function global:Get-VBRJobObject               { param($Job, $ErrorAction) $global:MockJobObjects }
     function global:Get-VBRApplicationGroup        { param($ErrorAction) Assert-MockOk 'Get-VBRApplicationGroup'; $global:MockAppGroups }
+    function global:Get-VBRPluginJob                { param($ErrorAction) Assert-MockOk 'Get-VBRPluginJob'; $global:MockPluginJobs }
     function global:Get-VBRGoogleCloudAccount      { param($ErrorAction) $global:MockGcpAccounts }
     function global:Get-VBRGoogleCloudComputeAccount { param($ErrorAction) $global:MockGcpCompute }
     function global:Get-VBREPPermission {
@@ -125,7 +139,18 @@ BeforeAll {
         $global:MockLicense = $null; $global:MockHistory = $null; $global:MockSecurityOptions = $null
         $global:MockServers = @(); $global:MockTapeJobs = @(); $global:MockRegistry = @{}
         $global:MockCloudTenants = @(); $global:MockCloudGateways = @()
+        $global:MockPluginJobs = @()
+        # Default: domain-joined, both trust levels readable, no trusts -> SEC-003 Pass.
+        # Matches the shape measured on a real domain-joined 13.0.3 server.
+        $global:MockTrustInfo = [pscustomobject]@{
+            PartOfDomain = $true
+            DomainOk     = $true
+            DomainTrusts = @()
+            ForestOk     = $true
+            ForestTrusts = @()
+        }
         $global:MockPolicyReads = 0
+        $global:MockServerReads = 0
     }
 
     # ENV-001 reads nothing but the context, so it is driven by supplying one.
@@ -501,6 +526,192 @@ Describe 'DEP-002 Google Cloud' {
 
     It 'states what it checked when reporting a Pass' {
         (Invoke-Check 'Test-GoogleCloudPlugin').Detail | Should -Match 'configuration source'
+    }
+}
+
+# --------------------------------------------------------------------------------
+# The three limitations KB4800 added on 2026-09-10. None of them is fully readable
+# from Veeam PowerShell, so each reports what it CAN prove and defers the rest -
+# the populated cases below assert that the deferral is explicit rather than a
+# silent clean result.
+# --------------------------------------------------------------------------------
+
+Describe 'DEP-004 Hyper-V SCVMM' {
+    BeforeEach { Reset-MockState }
+
+    It 'flags an SCVMM server for confirmation' {
+        $global:MockServers = @([pscustomobject]@{ Name = 'scvmm01.corp.local'; Type = 'Scvmm' })
+        $r = Invoke-Check 'Test-ScvmmHighAvailability'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'scvmm01'
+    }
+
+    # The check must not claim the HA feature is configured - it cannot read that.
+    It 'does not assert that the High Availability feature is in use' {
+        $global:MockServers = @([pscustomobject]@{ Name = 'scvmm01'; Type = 'Scvmm' })
+        (Invoke-Check 'Test-ScvmmHighAvailability').Detail | Should -Match 'NOT readable'
+    }
+
+    # The limitation is scoped to SCVMM being added to Veeam, so a Hyper-V estate
+    # managed without SCVMM is a clean pass - not a deferral.
+    It 'passes cleanly for a Hyper-V deployment with no SCVMM' {
+        $global:MockServers = @(
+            [pscustomobject]@{ Name = 'hv01';    Type = 'HvServer' }
+            [pscustomobject]@{ Name = 'hvclu01'; Type = 'HvCluster' }
+        )
+        $r = Invoke-Check 'Test-ScvmmHighAvailability'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match '2 Hyper-V host\(s\)/cluster\(s\) are connected, but none is managed through SCVMM'
+    }
+
+    It 'passes cleanly, and says so, when there is no Hyper-V at all' {
+        $global:MockServers = @([pscustomobject]@{ Name = 'esx01'; Type = 'ESXi' })
+        $r = Invoke-Check 'Test-ScvmmHighAvailability'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'No Hyper-V host or cluster is connected'
+    }
+
+    It 'reports Manual rather than Pass when the server inventory cannot be read' {
+        $global:MockThrow = @('Get-VBRServer')
+        $r = Invoke-Check 'Test-ScvmmHighAvailability'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be read'
+    }
+}
+
+Describe 'DEP-005 Veeam Plug-in for oVirt' {
+    BeforeEach { Reset-MockState }
+
+    # ⚠️ This check originally read Get-VBRPluginJob and would NEVER have fired.
+    # Measured on a 13.1.1.18 appliance carrying three hypervisor plug-in jobs
+    # (Nutanix AHV, Proxmox VE, HPE Morpheus), that cmdlet returned ZERO - it covers
+    # the standalone enterprise DATABASE plug-ins, not hypervisor integrations. The
+    # real signal is Get-VBRJob with JobType 'VmbApiPolicyTempJob', and the platform
+    # name lives in TypeToString ("Proxmox Backup" on that server).
+    It 'flags a plug-in platform job and names the platform from TypeToString' {
+        $global:MockJobs = @(
+            [pscustomobject]@{ Name = 'Proxmox'; JobType = 'VmbApiPolicyTempJob'; TypeToString = 'Proxmox Backup' }
+        )
+        $r = Invoke-Check 'Test-OVirtPlugin'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'Proxmox Backup'
+    }
+
+    It 'uses stronger wording when a platform actually looks like oVirt' {
+        $global:MockJobs = @(
+            [pscustomobject]@{ Name = 'RHV prod'; JobType = 'VmbApiPolicyTempJob'; TypeToString = 'oVirt Backup' }
+        )
+        $r = Invoke-Check 'Test-OVirtPlugin'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'appears to belong to the Veeam Plug-in for oVirt'
+    }
+
+    # Exact enum comparison. An ordinary Backup job must not be read as a plug-in job.
+    It 'does not treat an ordinary backup job as a plug-in platform job' {
+        $global:MockJobs = @(
+            [pscustomobject]@{ Name = 'VMware - DC'; JobType = 'Backup'; TypeToString = 'VMware Backup' }
+        )
+        (Invoke-Check 'Test-OVirtPlugin').Status | Should -Be 'Pass'
+    }
+
+    # The old blind spot: plug-in infrastructure registered with no job at all.
+    # Measured - a Nutanix cluster registers as ExternalInfrastructureServer.
+    It 'flags external-infrastructure hosts even with no plug-in job' {
+        $global:MockServers = @([pscustomobject]@{ Name = 'nutanixce-01'; Type = 'ExternalInfrastructureServer' })
+        $r = Invoke-Check 'Test-OVirtPlugin'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'nutanixce-01'
+    }
+
+    It 'passes when no plug-in job and no external infrastructure exist' {
+        $global:MockServers = @([pscustomobject]@{ Name = 'esx01'; Type = 'ESXi' })
+        $r = Invoke-Check 'Test-OVirtPlugin'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'both read'
+    }
+
+    It 'reports Manual rather than Pass when the job list cannot be read' {
+        $global:MockThrow = @('Get-VBRJob')
+        $r = Invoke-Check 'Test-OVirtPlugin'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be read'
+    }
+
+    It 'reports Manual rather than Pass when the server inventory cannot be read' {
+        $global:MockThrow = @('Get-VBRServer')
+        (Invoke-Check 'Test-OVirtPlugin').Status | Should -Be 'Manual'
+    }
+
+    # A plug-in job whose TypeToString is missing must still be reported, not dropped.
+    It 'still reports a plug-in job whose platform cannot be read' {
+        $global:MockJobs = @([pscustomobject]@{ Name = 'Mystery'; JobType = 'VmbApiPolicyTempJob' })
+        $r = Invoke-Check 'Test-OVirtPlugin'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'platform not readable'
+    }
+}
+
+Describe 'Managed-server inventory is read once per run' {
+    BeforeEach { Reset-MockState }
+
+    # DEP-004, DEP-006 and PRE-002 all need the server list. Measured on a real 13.0.3
+    # server the whole run is ~6s, of which 4s is the connect, so this is hygiene rather
+    # than a hot path - but it was the last shared cmdlet still being fetched twice, and
+    # nothing in any check's OUTPUT changes if the cache is dropped, which is precisely
+    # why it needs a test instead of a reviewer noticing.
+    It 'fetches Get-VBRServer once across all three consumers' {
+        $global:MockServers = @([pscustomobject]@{ Name = 'hv01'; Type = 'HvServer' })
+        Invoke-Check 'Test-ScvmmHighAvailability'  | Out-Null
+        Invoke-Check 'Test-HyperVWorkgroupCluster' | Out-Null
+        Invoke-Check 'Test-PreMachineAccessibility' | Out-Null
+        $global:MockServerReads | Should -Be 1
+    }
+
+    # A throwing getter is deliberately not cached, so a transient failure stays
+    # transient rather than poisoning every later consumer in the run.
+    It 'does not cache a failed read' {
+        $global:MockThrow = @('Get-VBRServer')
+        Invoke-Check 'Test-ScvmmHighAvailability'  | Out-Null
+        Invoke-Check 'Test-HyperVWorkgroupCluster' | Out-Null
+        $global:MockServerReads | Should -Be 2
+    }
+
+    It 'tells PRE-002 apart from an empty inventory when the read fails' {
+        $global:MockThrow = @('Get-VBRServer')
+        (Invoke-Check 'Test-PreMachineAccessibility').Detail | Should -Match 'could not be read'
+    }
+}
+
+Describe 'DEP-006 Hyper-V workgroup cluster' {
+    BeforeEach { Reset-MockState }
+
+    It 'flags a Hyper-V cluster for confirmation' {
+        $global:MockServers = @([pscustomobject]@{ Name = 'hvclu01'; Type = 'HvCluster' })
+        $r = Invoke-Check 'Test-HyperVWorkgroupCluster'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'hvclu01'
+    }
+
+    # A standalone Hyper-V host is type HvServer. 'HvServer' and 'HvCluster' share a
+    # prefix, so a loose match would flag every Hyper-V host in the estate - the
+    # AGT-004 ManuallyDeployed/ManuallyAdded defect in a new place.
+    It 'does not treat a standalone Hyper-V host as a cluster' {
+        $global:MockServers = @([pscustomobject]@{ Name = 'hv01'; Type = 'HvServer' })
+        (Invoke-Check 'Test-HyperVWorkgroupCluster').Status | Should -Be 'Pass'
+    }
+
+    # A domain-joined cluster is unaffected, and the report must say so rather than
+    # implying every Hyper-V cluster blocks the migration.
+    It 'says a domain-joined cluster needs no action' {
+        $global:MockServers = @([pscustomobject]@{ Name = 'hvclu01'; Type = 'HvCluster' })
+        (Invoke-Check 'Test-HyperVWorkgroupCluster').Recommendation | Should -Match 'Domain-joined clusters require no action'
+    }
+
+    It 'reports Manual rather than Pass when the server inventory cannot be read' {
+        $global:MockThrow = @('Get-VBRServer')
+        $r = Invoke-Check 'Test-HyperVWorkgroupCluster'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'could not be read'
     }
 }
 
@@ -1297,11 +1508,83 @@ Describe 'SEC-001 four-eyes authorization' {
 Describe 'SEC-003 trusted-domain authentication' {
     BeforeEach { Reset-MockState }
 
-    It 'always defers, and states the appliance limitation' {
+    # SEC-003 stopped being permanently Manual once the PRECONDITION became readable:
+    # no trust relationship means no principal can be authenticating across one, so
+    # the limitation cannot apply. The principals themselves are deliberately NOT
+    # examined - a group in this domain can hold members from a trusted one and group
+    # membership is not readable, so reading assignments proves nothing.
+
+    It 'passes when the domain participates in no trust at all' {
+        $r = Invoke-Check 'Test-TrustedDomainAuth'
+        $r.Status | Should -Be 'Pass'
+        $r.Detail | Should -Match 'no trust relationships'
+    }
+
+    It 'names both levels it checked when passing' {
+        ((Invoke-Check 'Test-TrustedDomainAuth').Evidence -join ';') | Should -Match 'Domain-level trusts: 0.*Forest-level trusts: 0'
+    }
+
+    It 'defers on a domain-level trust, and names it' {
+        $global:MockTrustInfo.DomainTrusts = @(
+            [pscustomobject]@{ TargetName = 'other.local'; TrustType = 'External'; TrustDirection = 'Bidirectional' }
+        )
         $r = Invoke-Check 'Test-TrustedDomainAuth'
         $r.Status | Should -Be 'Manual'
-        $r.Status | Should -Not -Be 'Pass'
-        $r.Detail | Should -Match 'trusted-domain authentication'
+        ($r.Evidence -join ';') | Should -Match 'other\.local.*External'
+    }
+
+    It 'defers on a forest-level trust too' {
+        $global:MockTrustInfo.ForestTrusts = @(
+            [pscustomobject]@{ TargetName = 'partner.example'; TrustType = 'Forest'; TrustDirection = 'Inbound' }
+        )
+        (Invoke-Check 'Test-TrustedDomainAuth').Status | Should -Be 'Manual'
+    }
+
+    # A trust reported at both domain and forest level must not be counted twice.
+    It 'de-duplicates a trust reported at both levels' {
+        $t = [pscustomobject]@{ TargetName = 'other.local'; TrustType = 'External'; TrustDirection = 'Bidirectional' }
+        $global:MockTrustInfo.DomainTrusts = @($t)
+        $global:MockTrustInfo.ForestTrusts = @($t)
+        $r = Invoke-Check 'Test-TrustedDomainAuth'
+        $r.Status | Should -Be 'Manual'
+        @($r.Evidence).Count | Should -Be 1
+    }
+
+    # ⚠️ THE CRITICAL GUARD. Measured on a real domain: a trust-free domain returns
+    # nothing distinguishable from a failed call at the call site, so the call
+    # SUCCEEDING is the only sound discriminator. If a failure is ever read as "no
+    # trusts", every server with unreachable AD reports a false clean result.
+    It 'reports Manual rather than Pass when the domain trust list cannot be read' {
+        $global:MockTrustInfo.DomainOk = $false
+        $r = Invoke-Check 'Test-TrustedDomainAuth'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'domain trust list could not be read'
+    }
+
+    It 'reports Manual rather than Pass when the forest trust list cannot be read' {
+        $global:MockTrustInfo.ForestOk = $false
+        $r = Invoke-Check 'Test-TrustedDomainAuth'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'forest trust list could not be read'
+    }
+
+    # Not domain-joined is not a clean pass: the Credentials Manager can still hold
+    # domain accounts even though the machine itself has no domain.
+    It 'does not pass a workgroup server just because it has no domain' {
+        $global:MockTrustInfo.PartOfDomain = $false
+        $r = Invoke-Check 'Test-TrustedDomainAuth'
+        $r.Status | Should -Be 'Manual'
+        $r.Detail | Should -Match 'not domain-joined'
+    }
+
+    # Trust properties are documented .NET members but were never seen on a real
+    # trust - the validating domain had none - so a missing member must degrade, not
+    # break the finding.
+    It 'still reports a trust whose properties cannot be read' {
+        $global:MockTrustInfo.DomainTrusts = @([pscustomobject]@{ Unrelated = 'x' })
+        $r = Invoke-Check 'Test-TrustedDomainAuth'
+        $r.Status | Should -Be 'Manual'
+        ($r.Evidence -join ';') | Should -Match 'unreadable'
     }
 
     It 'does not name a cmdlet in its detail' {
@@ -1510,17 +1793,23 @@ Describe 'Verdict and exit code' {
 Describe 'READY is unreachable on a real server' {
     BeforeEach { Reset-MockState }
 
-    # Documented consequence rather than a defect: SEC-001 and SEC-003 return Manual
-    # unconditionally, because neither four-eyes state nor trusted-domain
-    # authentication is exposed to PowerShell at all. Any Manual demotes the verdict,
-    # so the best result a real server can reach is REVIEW WARNINGS with those two
-    # outstanding - which is a clean bill of health, and the examples README says so.
+    # Documented consequence rather than a defect: SEC-001 returns Manual
+    # unconditionally, because four-eyes state is not exposed to PowerShell at all
+    # (measured: Get-VBRSecurityOptions carries six properties and none relates to it).
+    # Any Manual demotes the verdict, so the best result a real server can reach is
+    # REVIEW WARNINGS with that one outstanding - which is a clean bill of health, and
+    # the examples README says so.
     #
-    # If this test ever fails, the ladder or those two checks changed, and the
-    # decision recorded in the roadmap needs revisiting rather than the test.
-    It 'is guaranteed by the two permanently manual checks' {
-        (Invoke-Check 'Test-FourEyes').Status        | Should -Be 'Manual'
-        (Invoke-Check 'Test-TrustedDomainAuth').Status | Should -Be 'Manual'
+    # ⚠️ This was "the two permanently manual checks" until SEC-003 gained a Pass path
+    # on 2026-09-14: a domain with no trust relationships cannot hit the limitation, so
+    # SEC-003 is no longer unconditional. READY stays unreachable regardless - SEC-001
+    # alone guarantees it - but the guarantee now rests on ONE check rather than two,
+    # which is worth knowing if SEC-001 ever becomes readable.
+    #
+    # If this test ever fails, the ladder or SEC-001 changed, and the decision recorded
+    # in the roadmap needs revisiting rather than the test.
+    It 'is guaranteed by the one permanently manual check' {
+        (Invoke-Check 'Test-FourEyes').Status | Should -Be 'Manual'
 
         $withThoseTwo = @('Manual','Manual') + (1..23 | ForEach-Object { 'Pass' })
         $results = @($withThoseTwo | ForEach-Object { [pscustomobject]@{ Status = $_ } })

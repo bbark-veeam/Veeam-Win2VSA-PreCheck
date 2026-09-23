@@ -210,15 +210,128 @@ function Test-RoleAssignmentUpnFormat {
         -Evidence ($bad | Sort-Object -Unique)
 }
 
+# The ONLY place the raw Active Directory calls live. Isolated so SEC-003 can be
+# tested without a domain, and so the measured findings below sit next to the code
+# they constrain.
+#
+# Measured 2026-09-14 on a domain-joined Windows VBR 13.0.3:
+#
+#   * Works with NO RSAT. The ActiveDirectory module was absent and every call
+#     still succeeded - System.DirectoryServices.ActiveDirectory ships with the
+#     framework. That was the load-bearing question; a check needing RSAT would not
+#     be viable on a typical VBR server.
+#   * Fast enough for a fleet: domain 33 ms, forest 3 ms, trust enumeration 19 ms
+#     and 5 ms. No timeout needed.
+#   * ⚠️ A trust-free domain returns NOTHING DISTINGUISHABLE FROM A FAILED CALL at
+#     the call site - an empty collection unrolls, so it arrives as $null exactly
+#     as a failure would. **The call not throwing is therefore the only sound
+#     discriminator.** Never infer "no trusts" from a null or empty return.
+#   * ⚠️ The [...ActiveDirectory.Domain] TYPE RESOLVES even where AD is completely
+#     unusable (confirmed on macOS, where only the call fails, wrapped in a generic
+#     MethodInvocationException). A type-availability guard proves nothing; the call
+#     has to be made and caught.
+#
+# Returns a single object with explicit Ok flags rather than bare collections, for
+# the same reason DEP-004/006 do: an empty collection and an unreadable one are the
+# same value once returned, and conflating them is how a clean result gets faked.
+function Get-PrecheckDomainTrustInfo {
+    [CmdletBinding()] param()
+
+    $partOfDomain = $null
+    try {
+        $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        if ($cs -and $cs.PSObject.Properties['PartOfDomain']) { $partOfDomain = [bool]$cs.PartOfDomain }
+    } catch { }
+
+    $domainOk = $false; $domainTrusts = @()
+    try {
+        $domainTrusts = @([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().GetAllTrustRelationships())
+        $domainOk = $true
+    } catch { }
+
+    # Read both levels. The domain object reports trusts this domain participates in
+    # (including automatic parent/child trusts inside a multi-domain forest); the
+    # forest object reports forest-level external/forest trusts. Either is a route
+    # for a principal from another domain to authenticate, so both must be empty.
+    $forestOk = $false; $forestTrusts = @()
+    try {
+        $forestTrusts = @([System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest().GetAllTrustRelationships())
+        $forestOk = $true
+    } catch { }
+
+    [pscustomobject]@{
+        PartOfDomain = $partOfDomain
+        DomainOk     = $domainOk
+        DomainTrusts = $domainTrusts
+        ForestOk     = $forestOk
+        ForestTrusts = $forestTrusts
+    }
+}
+
 function Test-TrustedDomainAuth {
     [CmdletBinding()] param([Parameter(Mandatory)] $Ctx)
 
     $id = 'SEC-003'; $cat = 'Security'; $title = 'Trusted-domain authentication'
+    $advice = 'Confirm no credentials or servers authenticate across a domain trust (accounts from a trusted, non-primary domain). Such access must be reworked before migration.'
 
-    # Not derivable from cmdlets - guided manual check.
-    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
-        -Detail 'The Veeam Software Appliance does not support trusted-domain authentication.' `
-        -Recommendation 'Confirm no credentials/servers authenticate across a domain trust (accounts from a trusted, non-primary domain). Such access must be reworked before migration.'
+    # KB4800 scopes this to TWO surfaces: "user accounts specified in Users and Roles
+    # and the Credentials Manager".
+    #
+    # ⚠️ Neither surface is examined, and that is deliberate. Reading the principals
+    # cannot settle it: a domain-local or universal group in this domain may contain
+    # foreign security principals from across a trust, and group membership is not
+    # readable from here - so "every assignment names a principal in one domain"
+    # proves nothing. (Excluding BUILTIN\Administrators makes that worse, not better:
+    # on a domain-joined server it is the entry most likely to span a trust.)
+    #
+    # Instead prove the PRECONDITION is absent. If the domain participates in no trust
+    # at all, then no principal on EITHER surface can be authenticating across one, so
+    # the limitation cannot apply. Same move as DB-001's PostgreSQL scoping, and it
+    # covers both surfaces at once rather than half of them.
+    $info = Get-PrecheckDomainTrustInfo
+
+    # Not domain-joined is NOT a clean pass: a workgroup backup server has no domain
+    # of its own to read trusts from, but its Credentials Manager can still hold
+    # domain accounts.
+    if ($info.PartOfDomain -eq $false) {
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail 'This server is not domain-joined, so it has no domain trusts to read. That does not clear the limitation: the Credentials Manager can still hold accounts from a domain, and the Veeam Software Appliance does not support trusted-domain authentication.' `
+            -Recommendation $advice
+    }
+
+    if (-not $info.DomainOk -or -not $info.ForestOk) {
+        $which = if (-not $info.DomainOk -and -not $info.ForestOk) { 'Neither the domain nor the forest trust list' }
+                 elseif (-not $info.DomainOk)                      { 'The domain trust list' }
+                 else                                             { 'The forest trust list' }
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "$which could not be read from Active Directory, so whether this domain has any trust relationships is unknown. The Veeam Software Appliance does not support trusted-domain authentication." `
+            -Recommendation $advice `
+            -Evidence @("Domain trust enumeration: $(if ($info.DomainOk) { 'read' } else { 'could not be read' })",
+                        "Forest trust enumeration: $(if ($info.ForestOk) { 'read' } else { 'could not be read' })")
+    }
+
+    # Both levels read. A trust reported at both levels appears twice, so de-duplicate.
+    # Trust properties are documented .NET members but have NOT been seen on a real
+    # trust (the validating lab had none), so read each defensively - a missing member
+    # must not break the finding.
+    $trusts = @($info.DomainTrusts) + @($info.ForestTrusts)
+    if ($trusts.Count -gt 0) {
+        $ev = @($trusts | ForEach-Object {
+            $target = if ($_.PSObject.Properties['TargetName'])     { "$($_.TargetName)" }     else { '<name unreadable>' }
+            $type   = if ($_.PSObject.Properties['TrustType'])      { "$($_.TrustType)" }      else { 'type unreadable' }
+            $dir    = if ($_.PSObject.Properties['TrustDirection']) { "$($_.TrustDirection)" } else { 'direction unreadable' }
+            "Trust: $target [$type, $dir]"
+        } | Sort-Object -Unique)
+
+        return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Manual `
+            -Detail "This domain participates in $($ev.Count) trust relationship(s), so trusted-domain authentication is possible here and the Veeam Software Appliance does not support it. Which accounts actually authenticate across a trust cannot be determined from this server - a group in this domain can contain members from a trusted one, and group membership is not readable." `
+            -Recommendation $advice `
+            -Evidence $ev
+    }
+
+    return New-PrecheckResult -Id $id -Category $cat -Title $title -Status Pass `
+        -Detail 'This domain participates in no trust relationships at either domain or forest level, so no account in Users and Roles or the Credentials Manager can be authenticating across a trust. The limitation cannot apply to this server.' `
+        -Evidence @('Domain-level trusts: 0', 'Forest-level trusts: 0')
 }
 
 function Test-RepositoryLocalAccounts {
